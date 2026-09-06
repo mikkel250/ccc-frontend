@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JOB_STATUSES } from "../lib/jobs";
 import {
-  keepFirstOperatorIfLocked,
+  claimFirstOperatorSlot,
   publicRegistrationAllowed,
   registrationIsOpen,
 } from "../lib/registration";
@@ -20,6 +20,12 @@ describe("Job Prisma schema", () => {
     for (const status of JOB_STATUSES) {
       assert.match(schema, new RegExp(`\\b${status}\\b`));
     }
+  });
+
+  it("defines a singleton RegistrationClaim primary key", () => {
+    const claimModel = schema.match(/model RegistrationClaim \{[\s\S]*?\n\}/)?.[0] ?? "";
+    assert.match(claimModel, /^\s*id\s+Int\s+@id$/m);
+    assert.match(claimModel, /@@map\("registration_claim"\)/);
   });
 });
 
@@ -62,28 +68,50 @@ describe("registrationIsOpen", () => {
   });
 });
 
-describe("keepFirstOperatorIfLocked", () => {
-  it("deletes every user after the earliest when registration is closed", async () => {
-    const deleted: string[][] = [];
-    await keepFirstOperatorIfLocked({
-      allowRegistration: undefined,
-      listUsers: async () => [{ id: "first" }, { id: "second" }, { id: "third" }],
-      deleteExtra: async (ids) => {
-        deleted.push(ids);
+describe("claimFirstOperatorSlot", () => {
+  it("skips the claim when ALLOW_REGISTRATION is true", async () => {
+    let claimed = false;
+    const allowed = await claimFirstOperatorSlot({
+      allowRegistration: "true",
+      claim: async () => {
+        claimed = true;
+        return false;
       },
     });
-    assert.deepEqual(deleted, [["second", "third"]]);
+    assert.equal(allowed, true);
+    assert.equal(claimed, false);
   });
 
-  it("does not delete extras when ALLOW_REGISTRATION is true", async () => {
-    let deleted = false;
-    await keepFirstOperatorIfLocked({
-      allowRegistration: "true",
-      listUsers: async () => [{ id: "first" }, { id: "second" }],
-      deleteExtra: async () => {
-        deleted = true;
-      },
+  it("allows the request that wins the first-operator claim", async () => {
+    const allowed = await claimFirstOperatorSlot({
+      allowRegistration: undefined,
+      claim: async () => true,
     });
-    assert.equal(deleted, false);
+    assert.equal(allowed, true);
+  });
+
+  it("fails closed when the singleton claim is already taken", async () => {
+    const allowed = await claimFirstOperatorSlot({
+      allowRegistration: undefined,
+      claim: async () => false,
+    });
+    assert.equal(allowed, false);
+  });
+
+  it("lets only one of two overlapping claims succeed", async () => {
+    let occupied = false;
+    const claim = async () => {
+      if (occupied) {
+        return false;
+      }
+      occupied = true;
+      return true;
+    };
+    const results = await Promise.all([
+      claimFirstOperatorSlot({ allowRegistration: undefined, claim }),
+      claimFirstOperatorSlot({ allowRegistration: undefined, claim }),
+    ]);
+    assert.equal(results.filter(Boolean).length, 1);
+    assert.equal(results.includes(false), true);
   });
 });

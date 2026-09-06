@@ -94,3 +94,10 @@ model Job {
 
   @@index([userId, status, position])
 }
+
+model RegistrationClaim {
+  id        Int      @id
+  claimedAt DateTime @default(now())
+
+  @@map("registration_claim")
+}

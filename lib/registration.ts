@@ -1,3 +1,5 @@
+export const FIRST_OPERATOR_CLAIM_ID = 1;
+
 export function registrationIsOpen(
   existingUserCount: number,
   allowRegistration: string | undefined
@@ -22,29 +24,33 @@ export async function publicRegistrationAllowed(deps: {
   return registrationIsOpen(exists ? 1 : 0, allowRegistration);
 }
 
-export async function keepFirstOperatorIfLocked(deps: {
+/**
+ * Atomically claim the first-operator signup slot when public registration is off.
+ * Returns true when this request may create a user (open registration, or we won the
+ * singleton claim). Returns false when another operator already claimed the slot or a
+ * user already exists — callers must fail closed without deleting accounts.
+ */
+export async function claimFirstOperatorSlot(deps: {
   allowRegistration?: string;
-  listUsers?: () => Promise<{ id: string }[]>;
-  deleteExtra?: (ids: string[]) => Promise<void>;
-} = {}): Promise<void> {
+  claim?: () => Promise<boolean>;
+} = {}): Promise<boolean> {
   if (registrationIsOpen(1, deps.allowRegistration ?? process.env.ALLOW_REGISTRATION)) {
-    return;
+    return true;
   }
-  const users = deps.listUsers
-    ? await deps.listUsers()
-    : await (await import("./prisma")).prisma.user.findMany({
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
-      });
-  const extraIds = users.slice(1).map((user) => user.id);
-  if (extraIds.length === 0) {
-    return;
+  if (deps.claim) {
+    return deps.claim();
   }
-  if (deps.deleteExtra) {
-    await deps.deleteExtra(extraIds);
-    return;
-  }
-  await (await import("./prisma")).prisma.user.deleteMany({
-    where: { id: { in: extraIds } },
-  });
+  return insertFirstOperatorClaim();
+}
+
+async function insertFirstOperatorClaim(): Promise<boolean> {
+  const { prisma } = await import("./prisma");
+  const rows = await prisma.$queryRaw<Array<{ id: number }>>`
+    INSERT INTO "registration_claim" ("id")
+    SELECT ${FIRST_OPERATOR_CLAIM_ID}
+    WHERE NOT EXISTS (SELECT 1 FROM "user")
+    ON CONFLICT ("id") DO NOTHING
+    RETURNING "id"
+  `;
+  return rows.length > 0;
 }

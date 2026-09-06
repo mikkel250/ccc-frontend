@@ -5,7 +5,9 @@
 **Review run:** `/tmp/compound-engineering-501/ce-code-review/20260906-135442-d5aebc65`  
 **Plan:** `docs/plans/2026-09-06-002-feat-kanban-job-tracker-plan.md`
 
-Applied in `fix(review): apply review findings`: first-user after-hook plus adapter transactions, Prisma/board error paths, `updateMany` not-found, auth form/sign-out failure UI, CCC 401/403 remapped to 502, date-only `appliedAt`, and the missing registration/jobs/tailor tests.
+Applied in `fix(review): apply review findings`: adapter transactions, Prisma/board error paths, `updateMany` not-found, auth form/sign-out failure UI, CCC 401/403 remapped to 502, date-only `appliedAt`, and the missing registration/jobs/tailor tests.
+
+First-user signup is serialized by inserting a singleton `RegistrationClaim` (`id=1`) in the Better Auth before hook. Concurrent `POST /api/auth/sign-up/email` against an empty user table: one insert wins, the other hits the unique primary key and fails closed with FORBIDDEN. The previous after-hook that deleted extra users was removed.
 
 ## Residual Review Findings
 
