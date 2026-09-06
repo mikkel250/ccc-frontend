@@ -1,6 +1,13 @@
+import { redirect } from "next/navigation";
+import { getSessionUserId } from "@/lib/session";
 import { TailorForm } from "./tailor-form";
 
-export default function Home() {
+export default async function Home() {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    redirect("/login");
+  }
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-8">
       <div>
