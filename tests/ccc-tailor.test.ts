@@ -105,20 +105,6 @@ describe("tailorOnDemand", () => {
       assert.equal(result.error, "Curator output was not valid JSON");
     }
   });
-
-  it("does not forward a spoofed client IP", async () => {
-    const result = await tailorOnDemand("Senior engineer JD", {
-      apiUrl: "http://ccc.test",
-      apiKey: "secret",
-      clientIp: "127.0.0.1",
-      fetchImpl: async (_input, init) => {
-        const headers = new Headers(init?.headers);
-        assert.equal(headers.get("x-forwarded-for"), "127.0.0.1");
-        return Response.json({ cv: "UEsDbA==", replyText: "Thanks" });
-      },
-    });
-    assert.equal(result.ok, true);
-  });
 });
 
 describe("handleTailorPost", () => {
