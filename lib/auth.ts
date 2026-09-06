@@ -3,7 +3,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { prisma } from "./prisma";
-import { registrationIsOpen } from "./registration";
+import { keepFirstOperatorIfLocked, publicRegistrationAllowed } from "./registration";
 
 const origin = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
 
@@ -13,6 +13,7 @@ export const auth = betterAuth({
   trustedOrigins: [origin],
   database: prismaAdapter(prisma, {
     provider: "postgresql",
+    transaction: true,
   }),
   emailAndPassword: {
     enabled: true,
@@ -23,12 +24,17 @@ export const auth = betterAuth({
       if (ctx.path !== "/sign-up/email") {
         return;
       }
-      const existingUserCount = await prisma.user.count();
-      if (!registrationIsOpen(existingUserCount, process.env.ALLOW_REGISTRATION)) {
+      if (!(await publicRegistrationAllowed())) {
         throw new APIError("FORBIDDEN", {
           message: "Registration is closed.",
         });
       }
+    }),
+    after: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-up/email") {
+        return;
+      }
+      await keepFirstOperatorIfLocked();
     }),
   },
   plugins: [nextCookies()],

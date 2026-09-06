@@ -172,4 +172,40 @@ describe("handleTailorPost", () => {
     const body = (await response.json()) as { cv?: string };
     assert.equal(body.cv, "UEsDbA==");
   });
+
+  it("returns 400 for invalid JSON", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not-json",
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => {
+          throw new Error("should not tailor");
+        },
+      }
+    );
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Invalid JSON.");
+  });
+
+  it("maps CCC 401 to 502 so session 401 stays unique", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => ({ ok: false, status: 401, error: "Unauthorized" }),
+      }
+    );
+    assert.equal(response.status, 502);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Unauthorized");
+  });
 });

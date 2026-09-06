@@ -16,18 +16,23 @@ export function RegisterForm() {
     setPending(true);
     setError(null);
     const name = email.split("@")[0] || "operator";
-    const { error: signUpError } = await authClient.signUp.email({
-      email,
-      password,
-      name,
-    });
-    setPending(false);
-    if (signUpError) {
-      setError(signUpError.message || "Registration failed. Please try again.");
-      return;
+    try {
+      const { error: signUpError } = await authClient.signUp.email({
+        email,
+        password,
+        name,
+      });
+      if (signUpError) {
+        setError(signUpError.message || "Registration failed. Please try again.");
+        return;
+      }
+      router.push("/board");
+      router.refresh();
+    } catch {
+      setError("Registration failed. Please try again.");
+    } finally {
+      setPending(false);
     }
-    router.push("/board");
-    router.refresh();
   }
 
   return (

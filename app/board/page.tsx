@@ -1,14 +1,9 @@
-import { redirect } from "next/navigation";
-import { listJobs } from "@/lib/jobs";
-import { getSessionUserId } from "@/lib/session";
-import { KanbanBoard, type BoardJob } from "./kanban-board";
+import { listJobs, toBoardJob } from "@/lib/jobs";
+import { requireSessionUserId } from "@/lib/session";
+import { KanbanBoard } from "./kanban-board";
 
 export default async function BoardPage() {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    redirect("/login");
-  }
-
+  const userId = await requireSessionUserId();
   const listed = await listJobs(userId);
   if (!listed.ok) {
     return (
@@ -21,16 +16,6 @@ export default async function BoardPage() {
     );
   }
 
-  const jobs: BoardJob[] = listed.jobs.map((job) => ({
-    id: job.id,
-    company: job.company,
-    title: job.title,
-    url: job.url,
-    notes: job.notes,
-    status: job.status,
-    appliedAt: job.appliedAt.toISOString().slice(0, 10),
-  }));
-
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-8">
       <div>
@@ -39,7 +24,7 @@ export default async function BoardPage() {
           Track roles you have applied to. Cards stay on this account only.
         </p>
       </div>
-      <KanbanBoard jobs={jobs} />
+      <KanbanBoard jobs={listed.jobs.map(toBoardJob)} />
     </main>
   );
 }

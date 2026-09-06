@@ -33,7 +33,8 @@ export async function handleTailorPost(
     clientIp: TRUSTED_CCC_CLIENT_IP,
   });
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: result.status });
+    const status = result.status === 401 || result.status === 403 ? 502 : result.status;
+    return NextResponse.json({ error: result.error }, { status });
   }
   return NextResponse.json({ cv: result.cv, replyText: result.replyText });
 }

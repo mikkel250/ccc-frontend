@@ -27,7 +27,11 @@ export type JobsStore = {
     findFirst: (args: { where: { id: string; userId?: string } }) => Promise<JobRecord | null>;
     create: (args: { data: Record<string, unknown> }) => Promise<JobRecord>;
     update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<JobRecord>;
-    delete: (args: { where: { id: string } }) => Promise<JobRecord>;
+    updateMany: (args: {
+      where: { id: string; userId: string };
+      data: Record<string, unknown>;
+    }) => Promise<{ count: number }>;
+    deleteMany: (args: { where: { id: string; userId: string } }) => Promise<{ count: number }>;
     aggregate: (args: {
       where: { userId: string; status?: JobStatus };
       _max: { position: true };
@@ -45,6 +49,10 @@ export type JobFailure = {
   error: string;
 };
 
+export type BoardJob = Pick<JobRecord, "id" | "company" | "title" | "url" | "notes" | "status"> & {
+  appliedAt: string;
+};
+
 export type CreateJobInput = {
   company: string;
   title: string;
@@ -54,18 +62,28 @@ export type CreateJobInput = {
   status?: string;
 };
 
-export type UpdateJobInput = {
-  company?: string;
-  title?: string;
-  url?: string | null;
-  notes?: string | null;
-  appliedAt?: Date | string | null;
-  status?: string;
-};
+export type UpdateJobInput = Partial<CreateJobInput>;
+
+export function isJobStatus(value: string): value is JobStatus {
+  return (JOB_STATUSES as readonly string[]).includes(value);
+}
+
+export function toBoardJob(job: JobRecord): BoardJob {
+  return {
+    id: job.id,
+    company: job.company,
+    title: job.title,
+    url: job.url,
+    notes: job.notes,
+    status: job.status,
+    appliedAt: job.appliedAt.toISOString().slice(0, 10),
+  };
+}
 
 const jobStatusSchema = z.enum(JOB_STATUSES);
+const requiredNameSchema = z.string().trim().min(1).max(200);
 
-const httpUrlSchema = z
+const emptyToNull = z
   .union([z.string(), z.null(), z.undefined()])
   .transform((value) => {
     if (value == null) {
@@ -73,33 +91,28 @@ const httpUrlSchema = z
     }
     const trimmed = value.trim();
     return trimmed === "" ? null : trimmed;
-  })
-  .refine((value) => {
-    if (value == null) {
-      return true;
-    }
-    try {
-      const parsed = new URL(value);
-      return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch {
-      return false;
-    }
-  }, "URL must be http or https");
+  });
 
-const notesSchema = z
-  .union([z.string(), z.null(), z.undefined()])
-  .transform((value) => {
-    if (value == null) {
-      return null;
-    }
-    const trimmed = value.trim();
-    return trimmed === "" ? null : trimmed;
-  })
-  .refine((value) => value == null || value.length <= 4000, "Notes are too long");
+const httpUrlSchema = emptyToNull.refine((value) => {
+  if (value == null) {
+    return true;
+  }
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}, "URL must be http or https");
+
+const notesSchema = emptyToNull.refine(
+  (value) => value == null || value.length <= 4000,
+  "Notes are too long"
+);
 
 const createJobSchema = z.object({
-  company: z.string().trim().min(1).max(200),
-  title: z.string().trim().min(1).max(200),
+  company: requiredNameSchema,
+  title: requiredNameSchema,
   url: httpUrlSchema.optional(),
   notes: notesSchema.optional(),
   status: jobStatusSchema.optional().default("applied"),
@@ -115,6 +128,24 @@ function requireUserId(userId: string): JobFailure | null {
     return { ok: false, code: "invalid", error: "Sign in required." };
   }
   return null;
+}
+
+function calendarDateUtc(value = new Date()): Date {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+}
+
+async function withStore<T>(
+  run: () => Promise<T>,
+  error: string
+): Promise<T | JobFailure> {
+  try {
+    return await run();
+  } catch {
+    return { ok: false, code: "invalid", error };
+  }
 }
 
 function parseAppliedAt(value: Date | string | null | undefined): Date | undefined | "invalid" {
@@ -136,6 +167,10 @@ async function nextPosition(db: JobsStore, userId: string, status: JobStatus): P
   return (agg._max.position ?? -1) + 1;
 }
 
+function isJobFailure(value: unknown): value is JobFailure {
+  return Boolean(value && typeof value === "object" && "ok" in value && (value as { ok: unknown }).ok === false);
+}
+
 export async function listJobs(
   userId: string,
   deps?: JobDeps
@@ -144,11 +179,18 @@ export async function listJobs(
   if (authError) {
     return authError;
   }
-  const jobs = await getDb(deps).job.findMany({
-    where: { userId },
-    orderBy: [{ status: "asc" }, { position: "asc" }],
-  });
-  return { ok: true, jobs };
+  const listed = await withStore(
+    () =>
+      getDb(deps).job.findMany({
+        where: { userId },
+        orderBy: [{ status: "asc" }, { position: "asc" }],
+      }),
+    "Could not load applications. Please try again."
+  );
+  if (isJobFailure(listed)) {
+    return listed;
+  }
+  return { ok: true, jobs: listed };
 }
 
 export async function createJob(
@@ -169,20 +211,26 @@ export async function createJob(
     return { ok: false, code: "invalid", error: "Check the applied date." };
   }
   const db = getDb(deps);
-  const position = await nextPosition(db, userId, parsed.data.status);
-  const job = await db.job.create({
-    data: {
-      userId,
-      company: parsed.data.company,
-      title: parsed.data.title,
-      url: parsed.data.url ?? null,
-      notes: parsed.data.notes ?? null,
-      status: parsed.data.status,
-      position,
-      ...(appliedAt ? { appliedAt } : {}),
-    },
-  });
-  return { ok: true, job };
+  const persistedAppliedAt = appliedAt ?? calendarDateUtc();
+  const created = await withStore(async () => {
+    const position = await nextPosition(db, userId, parsed.data.status);
+    return db.job.create({
+      data: {
+        userId,
+        company: parsed.data.company,
+        title: parsed.data.title,
+        url: parsed.data.url ?? null,
+        notes: parsed.data.notes ?? null,
+        status: parsed.data.status,
+        position,
+        appliedAt: persistedAppliedAt,
+      },
+    });
+  }, "Could not save. Please try again.");
+  if (isJobFailure(created)) {
+    return created;
+  }
+  return { ok: true, job: created };
 }
 
 export async function updateJob(
@@ -199,20 +247,26 @@ export async function updateJob(
     return { ok: false, code: "invalid", error: "Job is required." };
   }
   const db = getDb(deps);
-  const existing = await db.job.findFirst({ where: { id: jobId, userId } });
+  const existing = await withStore(
+    () => db.job.findFirst({ where: { id: jobId, userId } }),
+    "Could not save. Please try again."
+  );
+  if (isJobFailure(existing)) {
+    return existing;
+  }
   if (!existing) {
     return { ok: false, code: "not_found", error: "Job not found." };
   }
   const patch: Record<string, unknown> = {};
   if (input.company !== undefined) {
-    const company = z.string().trim().min(1).max(200).safeParse(input.company);
+    const company = requiredNameSchema.safeParse(input.company);
     if (!company.success) {
       return { ok: false, code: "invalid", error: "Check the company, title, URL, and notes." };
     }
     patch.company = company.data;
   }
   if (input.title !== undefined) {
-    const title = z.string().trim().min(1).max(200).safeParse(input.title);
+    const title = requiredNameSchema.safeParse(input.title);
     if (!title.success) {
       return { ok: false, code: "invalid", error: "Check the company, title, URL, and notes." };
     }
@@ -248,14 +302,33 @@ export async function updateJob(
     }
     if (status.data !== existing.status) {
       patch.status = status.data;
-      patch.position = await nextPosition(db, userId, status.data);
+      const position = await withStore(
+        () => nextPosition(db, userId, status.data),
+        "Could not save. Please try again."
+      );
+      if (isJobFailure(position)) {
+        return position;
+      }
+      patch.position = position;
     }
   }
-  const job = await db.job.update({
-    where: { id: existing.id },
-    data: patch,
-  });
-  return { ok: true, job };
+  const saved = await withStore(async () => {
+    const updated = await db.job.updateMany({
+      where: { id: jobId, userId },
+      data: patch,
+    });
+    if (updated.count === 0) {
+      return null;
+    }
+    return db.job.findFirst({ where: { id: jobId, userId } });
+  }, "Could not save. Please try again.");
+  if (isJobFailure(saved)) {
+    return saved;
+  }
+  if (!saved) {
+    return { ok: false, code: "not_found", error: "Job not found." };
+  }
+  return { ok: true, job: saved };
 }
 
 export async function deleteJob(
@@ -268,10 +341,15 @@ export async function deleteJob(
     return authError;
   }
   const db = getDb(deps);
-  const existing = await db.job.findFirst({ where: { id: jobId, userId } });
-  if (!existing) {
+  const deleted = await withStore(
+    () => db.job.deleteMany({ where: { id: jobId, userId } }),
+    "Could not save. Please try again."
+  );
+  if (isJobFailure(deleted)) {
+    return deleted;
+  }
+  if (deleted.count === 0) {
     return { ok: false, code: "not_found", error: "Job not found." };
   }
-  await db.job.delete({ where: { id: existing.id } });
   return { ok: true };
 }

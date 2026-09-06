@@ -71,13 +71,29 @@ function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecor
         };
         return { ...rows[index] };
       },
-      async delete({ where }) {
-        const index = rows.findIndex((row) => row.id === where.id);
+      async updateMany({ where, data }) {
+        const index = rows.findIndex(
+          (row) => row.id === where.id && row.userId === where.userId
+        );
         if (index < 0) {
-          throw new Error("not found");
+          return { count: 0 };
         }
-        const [removed] = rows.splice(index, 1);
-        return { ...removed };
+        rows[index] = {
+          ...rows[index],
+          ...data,
+          updatedAt: new Date(),
+        };
+        return { count: 1 };
+      },
+      async deleteMany({ where }) {
+        const before = rows.length;
+        for (let index = rows.length - 1; index >= 0; index -= 1) {
+          const row = rows[index];
+          if (row.id === where.id && row.userId === where.userId) {
+            rows.splice(index, 1);
+          }
+        }
+        return { count: before - rows.length };
       },
       async aggregate({ where }) {
         const matching = rows.filter(
@@ -200,6 +216,67 @@ describe("jobs isolation", () => {
       assert.equal(result.code, "invalid");
     }
     assert.equal(db.rows.length, 0);
+  });
+
+  it("deletes the caller's own job", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    const result = await deleteJob("user-a", "a1", { db });
+    assert.equal(result.ok, true);
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("stores an empty URL as null on create and update", async () => {
+    const db = createMemoryStore();
+    const created = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", url: "" },
+      { db }
+    );
+    assert.equal(created.ok, true);
+    if (created.ok) {
+      assert.equal(created.job.url, null);
+    }
+    const updated = await updateJob("user-a", db.rows[0].id, { url: "" }, { db });
+    assert.equal(updated.ok, true);
+    if (updated.ok) {
+      assert.equal(updated.job.url, null);
+    }
+  });
+
+  it("defaults omitted appliedAt to the local calendar date at UTC midnight", async () => {
+    const db = createMemoryStore();
+    const created = await createJob("user-a", { company: "Acme", title: "Eng" }, { db });
+    assert.equal(created.ok, true);
+    if (created.ok) {
+      const local = new Date();
+      const expected = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}T00:00:00.000Z`;
+      assert.equal(created.job.appliedAt.toISOString(), expected);
+    }
+  });
+
+  it("returns not_found when updateMany matches no row", async () => {
+    const original = seedJob({ id: "a1", userId: "user-a", title: "Keep me" });
+    const db = createMemoryStore([original]);
+    db.job.findFirst = async () => original;
+    db.job.updateMany = async () => ({ count: 0 });
+    const result = await updateJob("user-a", "a1", { title: "After delete" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "not_found");
+    }
+    assert.equal(db.rows[0].title, "Keep me");
+  });
+
+  it("returns a save error when the store throws", async () => {
+    const db = createMemoryStore();
+    db.job.create = async () => {
+      throw new Error("db down");
+    };
+    const result = await createJob("user-a", { company: "Acme", title: "Eng" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+    }
   });
 
   it("moves a card to a new column at the next position", async () => {

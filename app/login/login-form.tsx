@@ -15,17 +15,22 @@ export function LoginForm() {
     event.preventDefault();
     setPending(true);
     setError(null);
-    const { error: signInError } = await authClient.signIn.email({
-      email,
-      password,
-    });
-    setPending(false);
-    if (signInError) {
-      setError(signInError.message || "Sign in failed. Please try again.");
-      return;
+    try {
+      const { error: signInError } = await authClient.signIn.email({
+        email,
+        password,
+      });
+      if (signInError) {
+        setError(signInError.message || "Sign in failed. Please try again.");
+        return;
+      }
+      router.push("/board");
+      router.refresh();
+    } catch {
+      setError("Sign in failed. Please try again.");
+    } finally {
+      setPending(false);
     }
-    router.push("/board");
-    router.refresh();
   }
 
   return (

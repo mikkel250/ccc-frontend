@@ -1,18 +1,11 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
-import { registrationIsOpen } from "@/lib/registration";
-import { getSessionUserId } from "@/lib/session";
+import { publicRegistrationAllowed } from "@/lib/registration";
+import { redirectIfSignedIn } from "@/lib/session";
 import { RegisterForm } from "./register-form";
 
 export default async function RegisterPage() {
-  const userId = await getSessionUserId();
-  if (userId) {
-    redirect("/board");
-  }
-
-  const existingUserCount = await prisma.user.count();
-  const open = registrationIsOpen(existingUserCount, process.env.ALLOW_REGISTRATION);
+  await redirectIfSignedIn();
+  const open = await publicRegistrationAllowed();
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-8">

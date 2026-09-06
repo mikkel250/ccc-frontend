@@ -7,17 +7,7 @@ import {
   moveJobAction,
   updateJobAction,
 } from "@/app/actions/jobs";
-import { JOB_STATUSES, type JobStatus } from "@/lib/jobs";
-
-export type BoardJob = {
-  id: string;
-  company: string;
-  title: string;
-  url: string | null;
-  notes: string | null;
-  status: JobStatus;
-  appliedAt: string;
-};
+import { JOB_STATUSES, isJobStatus, type BoardJob, type JobStatus } from "@/lib/jobs";
 
 const COLUMN_LABELS: Record<JobStatus, string> = {
   applied: "Applied",
@@ -29,6 +19,13 @@ const COLUMN_LABELS: Record<JobStatus, string> = {
 const inputClass =
   "rounded-md border border-neutral-300 bg-white p-2 text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100";
 
+function localDateInputValue(value = new Date()): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -36,13 +33,17 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
 
   function runAction(action: () => Promise<{ error?: string } | undefined>) {
     startTransition(async () => {
-      const result = await action();
-      if (result?.error) {
-        setError(result.error);
-        return;
+      try {
+        const result = await action();
+        if (result?.error) {
+          setError(result.error);
+          return;
+        }
+        setError(null);
+        setEditingId(null);
+      } catch {
+        setError("Could not save. Please try again.");
       }
-      setError(null);
-      setEditingId(null);
     });
   }
 
@@ -69,7 +70,13 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">
           Applied date
-          <input name="appliedAt" type="date" disabled={pending} className={inputClass} />
+          <input
+            name="appliedAt"
+            type="date"
+            defaultValue={localDateInputValue()}
+            disabled={pending}
+            className={inputClass}
+          />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium md:col-span-2">
           Notes
@@ -121,7 +128,10 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
                         disabled={pending}
                         className={inputClass}
                         onChange={(event) => {
-                          const nextStatus = event.target.value as JobStatus;
+                          const nextStatus = event.target.value;
+                          if (!isJobStatus(nextStatus)) {
+                            return;
+                          }
                           runAction(() => moveJobAction(job.id, nextStatus));
                         }}
                       >
@@ -149,9 +159,7 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
                           if (!window.confirm("Delete this application?")) {
                             return;
                           }
-                          const formData = new FormData();
-                          formData.set("id", job.id);
-                          runAction(() => deleteJobAction(formData));
+                          runAction(() => deleteJobAction(job.id));
                         }}
                       >
                         Delete
