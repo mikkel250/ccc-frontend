@@ -6,6 +6,8 @@ Gmail inbound drafts live in the [CCC](https://github.com/mikkel250/ccc) inbox w
 
 Next frontend `/lfg`: **Kanban job tracker** (applied roles). Gantt and follow-up nudges are parked until that board exists. See [docs/plans/README.md](docs/plans/README.md).
 
+Agent instructions: [AGENTS.md](AGENTS.md). Frontend strategy: [STRATEGY.md](STRATEGY.md). Domain terms: [CONCEPTS.md](CONCEPTS.md).
+
 ## Setup
 
 Requires Node.js 22+.
