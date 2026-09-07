@@ -14,11 +14,14 @@ Requires Node.js 22+.
 cp .env.example .env.local
 # Set TAILOR_API_KEY (same secret as CCC).
 # Point CCC_API_URL at a running CCC API.
+# For any non-loopback / production deploy, also set OPERATOR_TOKEN.
 npm install
 npm run dev
 ```
 
-This app defaults to port **3000**. Run CCC on **3001** (or set `CCC_API_URL`).
+`npm run dev` binds to **127.0.0.1** so the unauthenticated local proxy is not exposed on the LAN. This app defaults to port **3000**. Run CCC on **3001** (or set `CCC_API_URL`).
+
+Production (`next start` / a hosted deploy) **requires** `OPERATOR_TOKEN`. Paste the same value in the Operator token field; it is sent as `x-operator-token` and is never prefixed with `NEXT_PUBLIC_`.
 
 ```bash
 # in the CCC repo
@@ -31,4 +34,4 @@ PORT=3001 npm run dev
 - `npm test` — unit tests (mocked CCC; no live LLM)
 - `npm run build` — production build
 
-`TAILOR_API_KEY` is server-only. Do not prefix it with `NEXT_PUBLIC_`.
+`TAILOR_API_KEY` and `OPERATOR_TOKEN` are server-only. Do not prefix them with `NEXT_PUBLIC_`.
