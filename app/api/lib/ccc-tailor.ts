@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import {
   DEFAULT_CCC_FETCH_TIMEOUT_MS,
   GENERIC_ERROR,
@@ -71,8 +72,19 @@ export function clientSafeError(raw: unknown, apiKey?: string): string {
   return trimmed;
 }
 
-function isAbortError(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
+function resolvedClientIp(raw: string | undefined): string {
+  const trimmed = raw?.trim();
+  if (trimmed && isIP(trimmed)) {
+    return trimmed;
+  }
+  return TRUSTED_CCC_CLIENT_IP;
+}
+
+function isTimeoutOrAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("name" in error)) {
+    return false;
+  }
+  return error.name === "TimeoutError" || error.name === "AbortError";
 }
 
 export async function tailorOnDemand(
@@ -98,7 +110,7 @@ export async function tailorOnDemand(
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const clientIp = deps.clientIp?.trim() || TRUSTED_CCC_CLIENT_IP;
+  const clientIp = resolvedClientIp(deps.clientIp);
   let response: Response;
   try {
     response = await fetchImpl(`${apiUrl}/api/tailor-cv`, {
@@ -115,7 +127,7 @@ export async function tailorOnDemand(
       signal: AbortSignal.timeout(resolveTimeoutMs(deps)),
     });
   } catch (error) {
-    if (isAbortError(error)) {
+    if (isTimeoutOrAbortError(error)) {
       return { ok: false, status: 504, error: GENERIC_ERROR };
     }
     return { ok: false, status: 503, error: GENERIC_ERROR };

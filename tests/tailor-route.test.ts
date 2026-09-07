@@ -2,7 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { POST } from "../app/api/tailor/route";
 import { readTailorJobDescription } from "../app/api/lib/read-json-body";
-import { BODY_TOO_LARGE, GENERIC_ERROR, INVALID_JSON, OPERATOR_TOKEN_HEADER } from "../app/lib/tailor-constants";
+import {
+  BODY_TOO_LARGE,
+  GENERIC_ERROR,
+  INVALID_JSON,
+  OPERATOR_TOKEN_HEADER,
+  TRUSTED_CCC_CLIENT_IP,
+} from "../app/lib/tailor-constants";
 
 function snapshotEnv(keys: string[]): () => void {
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -182,6 +188,68 @@ describe("POST /api/tailor", () => {
         })
       );
       assert.equal(response.status, 200);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restore();
+    }
+  });
+
+  it("forwards a validated client IP to CCC", async () => {
+    const restore = snapshotEnv(["OPERATOR_TOKEN", "NODE_ENV", "CCC_API_URL", "TAILOR_API_KEY"]);
+    delete process.env.OPERATOR_TOKEN;
+    process.env.NODE_ENV = "development";
+    process.env.CCC_API_URL = "http://ccc.test";
+    process.env.TAILOR_API_KEY = "secret-key-value";
+    const originalFetch = globalThis.fetch;
+    let forwarded: string | null = null;
+    globalThis.fetch = (async (_input, init) => {
+      forwarded = new Headers(init?.headers).get("x-forwarded-for");
+      return Response.json({ cv: "UEsDbA==", replyText: null });
+    }) as typeof fetch;
+    try {
+      const response = await POST(
+        new Request("http://127.0.0.1/api/tailor", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": "  203.0.113.10  , 10.0.0.1",
+          },
+          body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+        })
+      );
+      assert.equal(response.status, 200);
+      assert.equal(forwarded, "203.0.113.10");
+    } finally {
+      globalThis.fetch = originalFetch;
+      restore();
+    }
+  });
+
+  it("falls back to TRUSTED_CCC_CLIENT_IP when the request has no valid client IP", async () => {
+    const restore = snapshotEnv(["OPERATOR_TOKEN", "NODE_ENV", "CCC_API_URL", "TAILOR_API_KEY"]);
+    delete process.env.OPERATOR_TOKEN;
+    process.env.NODE_ENV = "development";
+    process.env.CCC_API_URL = "http://ccc.test";
+    process.env.TAILOR_API_KEY = "secret-key-value";
+    const originalFetch = globalThis.fetch;
+    let forwarded: string | null = null;
+    globalThis.fetch = (async (_input, init) => {
+      forwarded = new Headers(init?.headers).get("x-forwarded-for");
+      return Response.json({ cv: "UEsDbA==", replyText: null });
+    }) as typeof fetch;
+    try {
+      const response = await POST(
+        new Request("http://127.0.0.1/api/tailor", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": "not-an-ip",
+          },
+          body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+        })
+      );
+      assert.equal(response.status, 200);
+      assert.equal(forwarded, TRUSTED_CCC_CLIENT_IP);
     } finally {
       globalThis.fetch = originalFetch;
       restore();

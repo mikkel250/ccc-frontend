@@ -12,6 +12,10 @@ function abortingFetch(): typeof fetch {
         return;
       }
       const abort = () => {
+        if (signal.reason !== undefined) {
+          reject(signal.reason);
+          return;
+        }
         const error = new Error("The operation was aborted");
         error.name = "AbortError";
         reject(error);
@@ -144,6 +148,36 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("sends an explicit clientIp as x-forwarded-for after trimming", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      clientIp: "  203.0.113.10  ",
+      fetchImpl: async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        assert.equal(headers.get("x-forwarded-for"), "203.0.113.10");
+        return Response.json({ cv: "UEsDbA==", replyText: "Thanks." });
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+
+  it("falls back to TRUSTED_CCC_CLIENT_IP when clientIp is blank or not an IP", async () => {
+    for (const clientIp of ["   ", "not-an-ip", "203.0.113.10\r\nX-Evil: 1"]) {
+      const result = await tailorOnDemand("Senior engineer JD", {
+        apiUrl: "http://ccc.test",
+        apiKey: "secret-key-value",
+        clientIp,
+        fetchImpl: async (_input, init) => {
+          const headers = new Headers(init?.headers);
+          assert.equal(headers.get("x-forwarded-for"), TRUSTED_CCC_CLIENT_IP);
+          return Response.json({ cv: "UEsDbA==", replyText: "Thanks." });
+        },
+      });
+      assert.equal(result.ok, true);
+    }
+  });
+
   it("maps CCC 401 to a client-safe error", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
@@ -206,6 +240,23 @@ describe("tailorOnDemand", () => {
     assert.equal(clientSafeError("Validation failed: too short", apiKey), "Validation failed: too short");
   });
 
+  it("redacts a short API key only when the full key is present", () => {
+    const apiKey = "shortky";
+    assert.equal(apiKey.length < 8, true);
+    assert.equal(clientSafeError("failed shortky check", apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError("failed shortk check", apiKey), "failed shortk check");
+  });
+
+  it("does not redact an unrelated seven-character key fragment", () => {
+    const apiKey = "sk-live-abcdefghijklmnopqrstuvwxyz";
+    const seven = apiKey.slice(0, 7);
+    const eight = apiKey.slice(0, 8);
+    assert.equal(seven.length, 7);
+    assert.equal(eight.length, 8);
+    assert.equal(clientSafeError(`bad ${seven} suffix`, apiKey), `bad ${seven} suffix`);
+    assert.equal(clientSafeError(`bad ${eight} suffix`, apiKey), GENERIC_ERROR);
+  });
+
   it("allows a JD of JD_MAX_CHARS and rejects JD_MAX_CHARS + 1 without fetching", async () => {
     let called = 0;
     const fetchImpl: typeof fetch = async () => {
@@ -253,6 +304,23 @@ describe("tailorOnDemand", () => {
       apiKey: "secret-key-value",
       timeoutMs: 20,
       fetchImpl: abortingFetch(),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 504);
+      assert.equal(result.error, GENERIC_ERROR);
+    }
+  });
+
+  it("maps TimeoutError from CCC fetch to 504", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      fetchImpl: async () => {
+        const error = new Error("The operation was aborted due to timeout");
+        error.name = "TimeoutError";
+        throw error;
+      },
     });
     assert.equal(result.ok, false);
     if (!result.ok) {
