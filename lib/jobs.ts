@@ -18,18 +18,26 @@ export type JobRecord = {
   updatedAt: Date;
 };
 
-export type JobsStore = {
+type JobCreateData = Omit<JobRecord, "id" | "createdAt" | "updatedAt"> & {
+  id?: string;
+};
+
+type JobUpdateData = Partial<
+  Pick<JobRecord, "company" | "title" | "url" | "notes" | "status" | "position" | "appliedAt">
+>;
+
+type JobsTransactionStore = {
   job: {
     findMany: (args: {
       where: { userId: string; status?: JobStatus };
       orderBy?: Array<Record<string, "asc" | "desc">>;
     }) => Promise<JobRecord[]>;
     findFirst: (args: { where: { id: string; userId?: string } }) => Promise<JobRecord | null>;
-    create: (args: { data: Record<string, unknown> }) => Promise<JobRecord>;
-    update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<JobRecord>;
+    create: (args: { data: JobCreateData }) => Promise<JobRecord>;
+    update: (args: { where: { id: string }; data: JobUpdateData }) => Promise<JobRecord>;
     updateMany: (args: {
       where: { id: string; userId: string };
-      data: Record<string, unknown>;
+      data: JobUpdateData;
     }) => Promise<{ count: number }>;
     deleteMany: (args: { where: { id: string; userId: string } }) => Promise<{ count: number }>;
     aggregate: (args: {
@@ -37,6 +45,10 @@ export type JobsStore = {
       _max: { position: true };
     }) => Promise<{ _max: { position: number | null } }>;
   };
+};
+
+export type JobsStore = JobsTransactionStore & {
+  $transaction: <T>(run: (tx: JobsTransactionStore) => Promise<T>) => Promise<T>;
 };
 
 export type JobDeps = {
@@ -159,12 +171,40 @@ function parseAppliedAt(value: Date | string | null | undefined): Date | undefin
   return Number.isNaN(parsed.getTime()) ? "invalid" : parsed;
 }
 
-async function nextPosition(db: JobsStore, userId: string, status: JobStatus): Promise<number> {
+async function nextPosition(
+  db: JobsTransactionStore,
+  userId: string,
+  status: JobStatus
+): Promise<number> {
   const agg = await db.job.aggregate({
     where: { userId, status },
     _max: { position: true },
   });
   return (agg._max.position ?? -1) + 1;
+}
+
+const POSITION_ALLOCATION_ATTEMPTS = 4;
+
+function isPositionConflict(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code: unknown }).code === "P2002"
+  );
+}
+
+async function retryPositionConflict<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; attempt <= POSITION_ALLOCATION_ATTEMPTS; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!isPositionConflict(error) || attempt === POSITION_ALLOCATION_ATTEMPTS) {
+        throw error;
+      }
+    }
+  }
+  throw new Error("Position allocation retry exhausted");
 }
 
 function isJobFailure(value: unknown): value is JobFailure {
@@ -212,21 +252,27 @@ export async function createJob(
   }
   const db = getDb(deps);
   const persistedAppliedAt = appliedAt ?? calendarDateUtc();
-  const created = await withStore(async () => {
-    const position = await nextPosition(db, userId, parsed.data.status);
-    return db.job.create({
-      data: {
-        userId,
-        company: parsed.data.company,
-        title: parsed.data.title,
-        url: parsed.data.url ?? null,
-        notes: parsed.data.notes ?? null,
-        status: parsed.data.status,
-        position,
-        appliedAt: persistedAppliedAt,
-      },
-    });
-  }, "Could not save. Please try again.");
+  const created = await withStore(
+    () =>
+      retryPositionConflict(() =>
+        db.$transaction(async (tx) => {
+          const position = await nextPosition(tx, userId, parsed.data.status);
+          return tx.job.create({
+            data: {
+              userId,
+              company: parsed.data.company,
+              title: parsed.data.title,
+              url: parsed.data.url ?? null,
+              notes: parsed.data.notes ?? null,
+              status: parsed.data.status,
+              position,
+              appliedAt: persistedAppliedAt,
+            },
+          });
+        })
+      ),
+    "Could not save. Please try again."
+  );
   if (isJobFailure(created)) {
     return created;
   }
@@ -257,7 +303,8 @@ export async function updateJob(
   if (!existing) {
     return { ok: false, code: "not_found", error: "Job not found." };
   }
-  const patch: Record<string, unknown> = {};
+  const patch: JobUpdateData = {};
+  let targetStatus: JobStatus | undefined;
   if (input.company !== undefined) {
     const company = requiredNameSchema.safeParse(input.company);
     if (!company.success) {
@@ -302,26 +349,29 @@ export async function updateJob(
     }
     if (status.data !== existing.status) {
       patch.status = status.data;
-      const position = await withStore(
-        () => nextPosition(db, userId, status.data),
-        "Could not save. Please try again."
-      );
-      if (isJobFailure(position)) {
-        return position;
-      }
-      patch.position = position;
+      targetStatus = status.data;
     }
   }
-  const saved = await withStore(async () => {
-    const updated = await db.job.updateMany({
-      where: { id: jobId, userId },
-      data: patch,
-    });
-    if (updated.count === 0) {
-      return null;
-    }
-    return db.job.findFirst({ where: { id: jobId, userId } });
-  }, "Could not save. Please try again.");
+  const saved = await withStore(
+    () =>
+      retryPositionConflict(() =>
+        db.$transaction(async (tx) => {
+          const transactionPatch = { ...patch };
+          if (targetStatus) {
+            transactionPatch.position = await nextPosition(tx, userId, targetStatus);
+          }
+          const updated = await tx.job.updateMany({
+            where: { id: jobId, userId },
+            data: transactionPatch,
+          });
+          if (updated.count === 0) {
+            return null;
+          }
+          return tx.job.findFirst({ where: { id: jobId, userId } });
+        })
+      ),
+    "Could not save. Please try again."
+  );
   if (isJobFailure(saved)) {
     return saved;
   }

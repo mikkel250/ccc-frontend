@@ -1,3 +1,5 @@
+import { APIError, getCurrentAdapter, type BetterAuthPlugin } from "better-auth";
+
 export const FIRST_OPERATOR_CLAIM_ID = 1;
 
 export function registrationIsOpen(
@@ -24,33 +26,68 @@ export async function publicRegistrationAllowed(deps: {
   return registrationIsOpen(exists ? 1 : 0, allowRegistration);
 }
 
-/**
- * Atomically claim the first-operator signup slot when public registration is off.
- * Returns true when this request may create a user (open registration, or we won the
- * singleton claim). Returns false when another operator already claimed the slot or a
- * user already exists — callers must fail closed without deleting accounts.
- */
-export async function claimFirstOperatorSlot(deps: {
+export function firstOperatorRegistration(deps: {
   allowRegistration?: string;
-  claim?: () => Promise<boolean>;
-} = {}): Promise<boolean> {
-  if (registrationIsOpen(1, deps.allowRegistration ?? process.env.ALLOW_REGISTRATION)) {
-    return true;
-  }
-  if (deps.claim) {
-    return deps.claim();
-  }
-  return insertFirstOperatorClaim();
-}
+} = {}): BetterAuthPlugin {
+  return {
+    id: "first-operator-registration",
+    schema: {
+      registrationClaim: {
+        modelName: "registrationClaim",
+        fields: {
+          id: { type: "number", required: true, unique: true },
+          claimedAt: { type: "date", required: true },
+        },
+      },
+    },
+    init(context) {
+      return {
+        options: {
+          databaseHooks: {
+            user: {
+              create: {
+                async before(_user, endpointContext) {
+                  if (
+                    endpointContext?.path !== "/sign-up/email" ||
+                    registrationIsOpen(
+                      1,
+                      deps.allowRegistration ?? process.env.ALLOW_REGISTRATION
+                    )
+                  ) {
+                    return;
+                  }
 
-async function insertFirstOperatorClaim(): Promise<boolean> {
-  const { prisma } = await import("./prisma");
-  const rows = await prisma.$queryRaw<Array<{ id: number }>>`
-    INSERT INTO "registration_claim" ("id")
-    SELECT ${FIRST_OPERATOR_CLAIM_ID}
-    WHERE NOT EXISTS (SELECT 1 FROM "user")
-    ON CONFLICT ("id") DO NOTHING
-    RETURNING "id"
-  `;
-  return rows.length > 0;
+                  const adapter = await getCurrentAdapter(context.adapter);
+                  const existingUserCount = await adapter.count({
+                    model: "user",
+                    where: [],
+                  });
+                  if (existingUserCount > 0) {
+                    throw new APIError("FORBIDDEN", {
+                      message: "Registration is closed.",
+                    });
+                  }
+
+                  try {
+                    await adapter.create({
+                      model: "registrationClaim",
+                      data: {
+                        id: FIRST_OPERATOR_CLAIM_ID,
+                        claimedAt: new Date(),
+                      },
+                      forceAllowId: true,
+                    });
+                  } catch {
+                    throw new APIError("FORBIDDEN", {
+                      message: "Registration is closed.",
+                    });
+                  }
+                },
+              },
+            },
+          },
+        },
+      };
+    },
+  };
 }

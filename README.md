@@ -18,8 +18,8 @@ cp .env.example .env
 # BETTER_AUTH_URL must match the browser origin (http://localhost:3000 locally).
 
 docker compose up -d
-npx prisma migrate deploy
 npm install
+npx prisma migrate deploy
 npm run dev
 ```
 

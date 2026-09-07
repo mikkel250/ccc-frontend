@@ -92,7 +92,7 @@ model Job {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  @@index([userId, status, position])
+  @@unique([userId, status, position])
 }
 
 model RegistrationClaim {

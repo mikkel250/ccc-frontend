@@ -121,16 +121,16 @@ export async function callLLM(...) {
 Before marking done, grep the module directory for any function whose signature overlaps ≥80% with what you just wrote. If found: delete yours, extend the existing one with a parameter.
 
 ### 2g. Apply coupling tags
-Scan only lines you wrote or modified. Add the tag on the line immediately above:
+Scan only lines you wrote or modified. Add the tag on the line immediately above, using the target language's comment syntax so the tag is always non-executable (for example, `// [SHARED-STATE]` in TypeScript/JavaScript, `# [SHARED-STATE]` in shell, or `-- [SHARED-STATE]` in SQL):
 
-| Condition | Tag |
-|-----------|-----|
-| Side effect outside local scope | `[SIDE-EFFECT]` |
-| DB trigger/cascade | `[DB-TRIGGER]` |
-| Required call order | `[SEQUENCE]` |
-| Shared/global state mutation | `[SHARED-STATE]` |
+| Condition | TypeScript/JavaScript example |
+|-----------|-------------------------------|
+| Side effect outside local scope | `// [SIDE-EFFECT]` |
+| DB trigger/cascade | `// [DB-TRIGGER]` |
+| Required call order | `// [SEQUENCE]` |
+| Shared/global state mutation | `// [SHARED-STATE]` |
 
-Tag only what you introduced. If none apply, add no tags.
+Tag only what you introduced. Preserve the immediate-above placement in every language, adapting the comment delimiter as needed. Never emit a raw tag marker as code. If none apply, add no tags.
 
 ### 2h. Iteration limits
 - **Routine:** up to 3 attempts per task
@@ -201,7 +201,7 @@ If no deferred tasks: "All tasks complete. Proceed to /ce-review-cheap for Tier 
 **Right:** Explicit types with discriminated unions.
 
 **Wrong:** Marking Done without coupling tags.
-**Right:** Scan modified lines, tag side effects, DB triggers, sequences, shared state.
+**Right:** Scan modified lines and add language-appropriate comment tags for side effects, DB triggers, sequences, and shared state.
 
 **Wrong:** Running tests without mental simulation first.
 **Right:** Predict Pass/Fail for every test before running the suite.

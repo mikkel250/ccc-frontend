@@ -11,8 +11,22 @@ import {
 
 function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecord[] } {
   const rows = seed.map((row) => ({ ...row }));
-  return {
+  let transactionTail = Promise.resolve();
+  const store: JobsStore & { rows: JobRecord[] } = {
     rows,
+    async $transaction(run) {
+      const previous = transactionTail;
+      let release = () => {};
+      transactionTail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await run({ job: store.job });
+      } finally {
+        release();
+      }
+    },
     job: {
       async findMany({ where, orderBy }) {
         let result = rows.filter((row) => row.userId === where.userId);
@@ -23,10 +37,15 @@ function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecor
           const keys = Array.isArray(orderBy) ? orderBy : [orderBy];
           result = [...result].sort((a, b) => {
             for (const key of keys) {
-              const field = Object.keys(key)[0] as keyof JobRecord;
+              const field = Object.keys(key)[0] as keyof JobRecord | undefined;
+              if (!field) continue;
               const dir = key[field] === "desc" ? -1 : 1;
-              if (a[field] < b[field]) return -1 * dir;
-              if (a[field] > b[field]) return 1 * dir;
+              const left = a[field];
+              const right = b[field];
+              if (left == null && right != null) return -1 * dir;
+              if (left != null && right == null) return 1 * dir;
+              if (left != null && right != null && left < right) return -1 * dir;
+              if (left != null && right != null && left > right) return 1 * dir;
             }
             return 0;
           });
@@ -108,6 +127,7 @@ function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecor
       },
     },
   };
+  return store;
 }
 
 const now = new Date("2026-09-01T12:00:00.000Z");
@@ -208,6 +228,46 @@ describe("jobs isolation", () => {
     }
   });
 
+  it("keeps positions unique and ordered during concurrent creates", async () => {
+    const db = createMemoryStore();
+    const results = await Promise.all([
+      createJob("user-a", { company: "Alpha", title: "Engineer" }, { db }),
+      createJob("user-a", { company: "Beta", title: "Designer" }, { db }),
+    ]);
+
+    assert.equal(results.every((result) => result.ok), true);
+    assert.deepEqual(
+      db.rows
+        .filter((job) => job.userId === "user-a" && job.status === "applied")
+        .sort((left, right) => left.position - right.position)
+        .map((job) => job.position),
+      [0, 1]
+    );
+  });
+
+  it("retries a create when its position conflicts", async () => {
+    const db = createMemoryStore();
+    const create = db.job.create;
+    let attempts = 0;
+    db.job.create = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("position conflict"), { code: "P2002" });
+      }
+      return create(args);
+    };
+
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Engineer" },
+      { db }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(attempts, 2);
+    assert.equal(db.rows[0]?.position, 0);
+  });
+
   it("requires a user id at the call boundary", async () => {
     const db = createMemoryStore();
     const result = await createJob("", { company: "Acme", title: "Eng" }, { db });
@@ -291,5 +351,54 @@ describe("jobs isolation", () => {
       assert.equal(result.job.position, 1);
     }
     assert.equal(db.rows.find((row) => row.id === "a1")?.status, "interview");
+  });
+
+  it("keeps positions unique and ordered during concurrent column moves", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+      seedJob({ id: "a2", userId: "user-a", status: "applied", position: 1 }),
+      seedJob({ id: "i1", userId: "user-a", status: "interview", position: 0 }),
+    ]);
+
+    const results = await Promise.all([
+      updateJob("user-a", "a1", { status: "interview" }, { db }),
+      updateJob("user-a", "a2", { status: "interview" }, { db }),
+    ]);
+
+    assert.equal(results.every((result) => result.ok), true);
+    assert.deepEqual(
+      db.rows
+        .filter((job) => job.userId === "user-a" && job.status === "interview")
+        .sort((left, right) => left.position - right.position)
+        .map((job) => job.position),
+      [0, 1, 2]
+    );
+  });
+
+  it("retries a column move when its target position conflicts", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    const updateMany = db.job.updateMany;
+    let attempts = 0;
+    db.job.updateMany = async (args) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("position conflict"), { code: "P2002" });
+      }
+      return updateMany(args);
+    };
+
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { status: "interview" },
+      { db }
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(attempts, 2);
+    assert.equal(db.rows[0]?.status, "interview");
+    assert.equal(db.rows[0]?.position, 0);
   });
 });

@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JOB_STATUSES } from "../lib/jobs";
-import {
-  claimFirstOperatorSlot,
-  publicRegistrationAllowed,
-  registrationIsOpen,
-} from "../lib/registration";
+import { publicRegistrationAllowed, registrationIsOpen } from "../lib/registration";
 
 describe("Job Prisma schema", () => {
   const schema = readFileSync(join(process.cwd(), "prisma/schema.prisma"), "utf8");
@@ -20,6 +16,7 @@ describe("Job Prisma schema", () => {
     for (const status of JOB_STATUSES) {
       assert.match(schema, new RegExp(`\\b${status}\\b`));
     }
+    assert.match(jobModel, /@@unique\(\[userId, status, position\]\)/);
   });
 
   it("defines a singleton RegistrationClaim primary key", () => {
@@ -65,53 +62,5 @@ describe("registrationIsOpen", () => {
     });
     assert.equal(closed, false);
     assert.equal(open, true);
-  });
-});
-
-describe("claimFirstOperatorSlot", () => {
-  it("skips the claim when ALLOW_REGISTRATION is true", async () => {
-    let claimed = false;
-    const allowed = await claimFirstOperatorSlot({
-      allowRegistration: "true",
-      claim: async () => {
-        claimed = true;
-        return false;
-      },
-    });
-    assert.equal(allowed, true);
-    assert.equal(claimed, false);
-  });
-
-  it("allows the request that wins the first-operator claim", async () => {
-    const allowed = await claimFirstOperatorSlot({
-      allowRegistration: undefined,
-      claim: async () => true,
-    });
-    assert.equal(allowed, true);
-  });
-
-  it("fails closed when the singleton claim is already taken", async () => {
-    const allowed = await claimFirstOperatorSlot({
-      allowRegistration: undefined,
-      claim: async () => false,
-    });
-    assert.equal(allowed, false);
-  });
-
-  it("lets only one of two overlapping claims succeed", async () => {
-    let occupied = false;
-    const claim = async () => {
-      if (occupied) {
-        return false;
-      }
-      occupied = true;
-      return true;
-    };
-    const results = await Promise.all([
-      claimFirstOperatorSlot({ allowRegistration: undefined, claim }),
-      claimFirstOperatorSlot({ allowRegistration: undefined, claim }),
-    ]);
-    assert.equal(results.filter(Boolean).length, 1);
-    assert.equal(results.includes(false), true);
   });
 });
