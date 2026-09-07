@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
 import { tailorOnDemand } from "../lib/ccc-tailor";
+import { authorizeOperator } from "../lib/operator-auth";
+import { readTailorJobDescription } from "../lib/read-json-body";
+import { requestClientIp } from "../lib/request-client-ip";
+
+/** Seconds. Must exceed DEFAULT_CCC_FETCH_TIMEOUT_MS. */
+export const maxDuration = 130;
 
 export async function POST(request: Request) {
-  let jobDescription = "";
-  try {
-    const body: unknown = await request.json();
-    if (body && typeof body === "object" && "jobDescription" in body) {
-      const value = (body as { jobDescription: unknown }).jobDescription;
-      if (typeof value === "string") {
-        jobDescription = value;
-      }
-    }
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
+  const auth = authorizeOperator(request);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
-  const result = await tailorOnDemand(jobDescription);
+  const parsed = await readTailorJobDescription(request);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  }
+
+  const result = await tailorOnDemand(parsed.jobDescription, {
+    clientIp: requestClientIp(request),
+  });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
