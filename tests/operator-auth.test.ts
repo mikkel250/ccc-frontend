@@ -11,19 +11,67 @@ function requestWithToken(token?: string): Request {
   return new Request("http://127.0.0.1/api/tailor", { method: "POST", headers });
 }
 
+function assertMissingEnv(result: ReturnType<typeof authorizeOperator>): void {
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.status, 503);
+    assert.equal(result.error, MISSING_ENV);
+  }
+}
+
 describe("authorizeOperator", () => {
-  it("allows local requests when OPERATOR_TOKEN is unset", () => {
+  it("allows local next-dev requests when OPERATOR_TOKEN is unset", () => {
     const result = authorizeOperator(requestWithToken(), { NODE_ENV: "development" });
     assert.deepEqual(result, { ok: true });
   });
 
+  it("allows vercel-dev requests when OPERATOR_TOKEN is unset", () => {
+    const result = authorizeOperator(requestWithToken(), {
+      NODE_ENV: "development",
+      VERCEL: "1",
+      VERCEL_ENV: "development",
+    });
+    assert.deepEqual(result, { ok: true });
+  });
+
   it("fails closed in production when OPERATOR_TOKEN is unset", () => {
-    const result = authorizeOperator(requestWithToken(), { NODE_ENV: "production" });
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.equal(result.status, 503);
-      assert.equal(result.error, MISSING_ENV);
-    }
+    assertMissingEnv(authorizeOperator(requestWithToken(), { NODE_ENV: "production" }));
+  });
+
+  it("fails closed in staging when OPERATOR_TOKEN is unset", () => {
+    assertMissingEnv(authorizeOperator(requestWithToken(), { NODE_ENV: "staging" }));
+  });
+
+  it("fails closed when NODE_ENV is unset", () => {
+    assertMissingEnv(authorizeOperator(requestWithToken(), {}));
+  });
+
+  it("fails closed on Vercel preview even if NODE_ENV is development", () => {
+    assertMissingEnv(
+      authorizeOperator(requestWithToken(), {
+        NODE_ENV: "development",
+        VERCEL: "1",
+        VERCEL_ENV: "preview",
+      })
+    );
+  });
+
+  it("fails closed on hosted Vercel without VERCEL_ENV", () => {
+    assertMissingEnv(
+      authorizeOperator(requestWithToken(), {
+        NODE_ENV: "development",
+        VERCEL: "1",
+      })
+    );
+  });
+
+  it("fails closed in CI even when NODE_ENV is development", () => {
+    assertMissingEnv(
+      authorizeOperator(requestWithToken(), {
+        NODE_ENV: "development",
+        CI: "true",
+      })
+    );
   });
 
   it("rejects a missing or wrong token when OPERATOR_TOKEN is set", () => {

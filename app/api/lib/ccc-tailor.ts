@@ -1,6 +1,7 @@
 import {
   DEFAULT_CCC_FETCH_TIMEOUT_MS,
   GENERIC_ERROR,
+  MAX_CCC_FETCH_TIMEOUT_MS,
   MISSING_ENV,
   TRUSTED_CCC_CLIENT_IP,
 } from "../../lib/tailor-constants";
@@ -31,15 +32,18 @@ export type TailorDeps = {
 
 const SECRET_SUBSTRING_LEN = 8;
 
-function resolveTimeoutMs(deps: TailorDeps): number {
-  if (typeof deps.timeoutMs === "number" && Number.isFinite(deps.timeoutMs) && deps.timeoutMs > 0) {
-    return deps.timeoutMs;
+export function resolveCccFetchTimeoutMs(
+  timeoutMs?: number,
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  let resolved: number;
+  if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    resolved = timeoutMs;
+  } else {
+    const fromEnv = Number(env.CCC_FETCH_TIMEOUT_MS);
+    resolved = Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_CCC_FETCH_TIMEOUT_MS;
   }
-  const fromEnv = Number(process.env.CCC_FETCH_TIMEOUT_MS);
-  if (Number.isFinite(fromEnv) && fromEnv > 0) {
-    return fromEnv;
-  }
-  return DEFAULT_CCC_FETCH_TIMEOUT_MS;
+  return Math.min(resolved, MAX_CCC_FETCH_TIMEOUT_MS);
 }
 
 function errorContainsSecret(raw: string, secret: string | undefined): boolean {
@@ -112,7 +116,7 @@ export async function tailorOnDemand(
         jobDescription: jd,
         curationMode: "strict",
       }),
-      signal: AbortSignal.timeout(resolveTimeoutMs(deps)),
+      signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps.timeoutMs)),
     });
   } catch (error) {
     if (isAbortError(error)) {

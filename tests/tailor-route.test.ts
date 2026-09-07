@@ -1,8 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { POST } from "../app/api/tailor/route";
+import { maxDuration, POST } from "../app/api/tailor/route";
 import { readTailorJobDescription } from "../app/api/lib/read-json-body";
-import { BODY_TOO_LARGE, GENERIC_ERROR, INVALID_JSON, OPERATOR_TOKEN_HEADER } from "../app/lib/tailor-constants";
+import {
+  BODY_TOO_LARGE,
+  GENERIC_ERROR,
+  INVALID_JSON,
+  MAX_CCC_FETCH_TIMEOUT_MS,
+  OPERATOR_TOKEN_HEADER,
+  TAILOR_ROUTE_MAX_DURATION_SECONDS,
+} from "../app/lib/tailor-constants";
 
 function snapshotEnv(keys: string[]): () => void {
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -51,6 +58,11 @@ describe("readTailorJobDescription", () => {
 });
 
 describe("POST /api/tailor", () => {
+  it("keeps maxDuration in sync with the fetch timeout cap", () => {
+    assert.equal(maxDuration, TAILOR_ROUTE_MAX_DURATION_SECONDS);
+    assert.equal(maxDuration * 1000 > MAX_CCC_FETCH_TIMEOUT_MS, true);
+  });
+
   it("returns 400 for malformed JSON", async () => {
     const restore = snapshotEnv(["OPERATOR_TOKEN", "NODE_ENV"]);
     delete process.env.OPERATOR_TOKEN;

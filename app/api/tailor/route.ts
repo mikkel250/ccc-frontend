@@ -3,7 +3,10 @@ import { tailorOnDemand } from "../lib/ccc-tailor";
 import { authorizeOperator } from "../lib/operator-auth";
 import { readTailorJobDescription } from "../lib/read-json-body";
 
-/** Seconds. Must exceed DEFAULT_CCC_FETCH_TIMEOUT_MS. */
+/**
+ * Seconds. Must stay in sync with TAILOR_ROUTE_MAX_DURATION_SECONDS and exceed
+ * MAX_CCC_FETCH_TIMEOUT_MS so a fetch abort can return 504 before platform kill.
+ */
 export const maxDuration = 130;
 
 export async function POST(request: Request) {

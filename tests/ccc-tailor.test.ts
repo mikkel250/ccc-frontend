@@ -1,7 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { clientSafeError, JD_MAX_CHARS, tailorOnDemand } from "../app/api/lib/ccc-tailor";
-import { GENERIC_ERROR, MISSING_ENV, TRUSTED_CCC_CLIENT_IP } from "../app/lib/tailor-constants";
+import {
+  clientSafeError,
+  JD_MAX_CHARS,
+  resolveCccFetchTimeoutMs,
+  tailorOnDemand,
+} from "../app/api/lib/ccc-tailor";
+import {
+  DEFAULT_CCC_FETCH_TIMEOUT_MS,
+  GENERIC_ERROR,
+  MAX_CCC_FETCH_TIMEOUT_MS,
+  MISSING_ENV,
+  TAILOR_ROUTE_MAX_DURATION_SECONDS,
+  TRUSTED_CCC_CLIENT_IP,
+} from "../app/lib/tailor-constants";
 
 function abortingFetch(): typeof fetch {
   return ((_input, init) =>
@@ -244,6 +256,44 @@ describe("tailorOnDemand", () => {
     if (!result.ok) {
       assert.equal(result.status, 503);
       assert.equal(result.error, GENERIC_ERROR);
+    }
+  });
+
+  it("clamps configured timeouts below the route maxDuration", () => {
+    assert.equal(MAX_CCC_FETCH_TIMEOUT_MS < TAILOR_ROUTE_MAX_DURATION_SECONDS * 1000, true);
+    assert.equal(DEFAULT_CCC_FETCH_TIMEOUT_MS <= MAX_CCC_FETCH_TIMEOUT_MS, true);
+    assert.equal(resolveCccFetchTimeoutMs(undefined, {}), DEFAULT_CCC_FETCH_TIMEOUT_MS);
+    assert.equal(resolveCccFetchTimeoutMs(20, {}), 20);
+    assert.equal(
+      resolveCccFetchTimeoutMs(undefined, { CCC_FETCH_TIMEOUT_MS: "50000" }),
+      50_000
+    );
+    assert.equal(
+      resolveCccFetchTimeoutMs(undefined, { CCC_FETCH_TIMEOUT_MS: "200000" }),
+      MAX_CCC_FETCH_TIMEOUT_MS
+    );
+    assert.equal(resolveCccFetchTimeoutMs(130_000, {}), MAX_CCC_FETCH_TIMEOUT_MS);
+    assert.equal(resolveCccFetchTimeoutMs(200_000, {}), MAX_CCC_FETCH_TIMEOUT_MS);
+  });
+
+  it("applies the clamped timeout to the CCC fetch abort signal", async () => {
+    const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const seen: number[] = [];
+    AbortSignal.timeout = ((ms: number) => {
+      seen.push(ms);
+      return originalTimeout(ms);
+    }) as typeof AbortSignal.timeout;
+    try {
+      const result = await tailorOnDemand("Senior engineer JD", {
+        apiUrl: "http://ccc.test",
+        apiKey: "secret-key-value",
+        timeoutMs: 500_000,
+        fetchImpl: async () => Response.json({ cv: "UEsDbA==" }),
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(seen, [MAX_CCC_FETCH_TIMEOUT_MS]);
+    } finally {
+      AbortSignal.timeout = originalTimeout;
     }
   });
 
