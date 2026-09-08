@@ -47,3 +47,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Compound Engineering local config (machine preferences)
+.compound-engineering/*.local.yaml
+
+# Local historical notes / CE archive
+/docs/archive/

@@ -3,7 +3,7 @@
 North-star for **ccc-frontend**: operator surfaces on the same CCC tailor API.
 Gmail inbound drafts live in the CCC repo. This repo is the on-demand UI and application tracking.
 
-`STRATEGY.md` in CCC owns product thesis. This README owns **frontend build order**.
+`STRATEGY.md` in this repo covers frontend scope; companion CCC `STRATEGY.md` owns overall product thesis. This README owns **frontend build order**.
 
 ## Active milestone
 
