@@ -14,7 +14,9 @@ You are a Work Execution Agent. Complexity tiers are already in the plan — you
 
 1. **Resolve the plan:**
    - If `$@` is provided: read that file.
-   - If blank: search `docs/plans/` for the most recent CE plan (timestamped .md files). Pick the newest.
+   - If blank:
+     1. Resolve CE artifact root `<root>`: read `docs_root` from `<repo-root>/.compound-engineering/config.local.yaml`, then `config.yaml`; first non-empty value wins (`<repo-root>` = `git rev-parse --show-toplevel`). Unset → `<root>` is `docs`. If `docs_root` is set, validate it is a repo-relative directory whose real, symlink-resolved path stays inside the repo and is neither the repo root nor under `.git/`. Otherwise stop with an error naming `docs_root` and the value — never fall back to `docs`.
+     2. Search `<root>/plans/` for the most recent CE plan (timestamped `.md` files). Pick the newest by date prefix.
    - If no plan found: "No plan found. Run /ce-plan first."
 
 2. **Read complexity tiers from the plan.** Each implementation unit must have a `Complexity:` field (Routine, Complex, or Difficult).
@@ -45,12 +47,11 @@ If this is a Complex pass and any tasks are Difficult, flag them: "⚠️  N Dif
 **Before any implementation code is written:**
 
 1. For each task in this pass, verify a test file exists that covers the specified `Tests:` scope.
-2. If tests exist: run them. Confirm they **fail** (no implementation yet).
-   - If tests pass without implementation: the tests are wrong. Rewrite them to test the missing behavior. Do not proceed until tests fail.
-3. If tests are missing: write them now. Full suite covering every case in the plan's `Tests:` field. Then run and confirm failure.
+2. If tests exist: run them.
+3. If coverage of the plan's `Tests:` field is missing: add or update focused tests for that planned behavior only. Do not rewrite unrelated tests.
 4. If any task has no `Tests:` field in the plan: stop. "Task N has no test specification. Update the plan with a `Tests:` field before execution."
 
-**Gate:** No implementation begins until every task in this pass has a failing test suite on disk.
+**Gate:** No implementation begins until every task in this pass has tests on disk covering the planned behavior.
 
 ---
 
@@ -72,7 +73,7 @@ async function parseResponse(
 ```
 
 ### 2b. Write implementation
-Write production code to satisfy the failing tests for this task.
+Write production code to satisfy the tests for this task.
 
 ### 2c. Self-correction pass (before running tests)
 Re-read every file you modified as a reviewer who did not write the code. Mentally simulate each test:
@@ -121,16 +122,16 @@ export async function callLLM(...) {
 Before marking done, grep the module directory for any function whose signature overlaps ≥80% with what you just wrote. If found: delete yours, extend the existing one with a parameter.
 
 ### 2g. Apply coupling tags
-Scan only lines you wrote or modified. Add the tag on the line immediately above, using the target language's comment syntax so the tag is always non-executable (for example, `// [SHARED-STATE]` in TypeScript/JavaScript, `# [SHARED-STATE]` in shell, or `-- [SHARED-STATE]` in SQL):
+Scan only lines you wrote or modified. On the line immediately above each modified line that needs a tag, add a language-appropriate comment containing the tag — never a bare executable token (for example `// [SIDE-EFFECT]`, not `[SIDE-EFFECT]` on its own):
 
-| Condition | TypeScript/JavaScript example |
-|-----------|-------------------------------|
-| Side effect outside local scope | `// [SIDE-EFFECT]` |
-| DB trigger/cascade | `// [DB-TRIGGER]` |
-| Required call order | `// [SEQUENCE]` |
-| Shared/global state mutation | `// [SHARED-STATE]` |
+| Condition | Tag |
+|-----------|-----|
+| Side effect outside local scope | `[SIDE-EFFECT]` |
+| DB trigger/cascade | `[DB-TRIGGER]` |
+| Required call order | `[SEQUENCE]` |
+| Shared/global state mutation | `[SHARED-STATE]` |
 
-Tag only what you introduced. Preserve the immediate-above placement in every language, adapting the comment delimiter as needed. Never emit a raw tag marker as code. If none apply, add no tags.
+Tag only what you introduced. If none apply, add no tags.
 
 ### 2h. Iteration limits
 - **Routine:** up to 3 attempts per task
@@ -182,14 +183,14 @@ If no deferred tasks: "All tasks complete. Proceed to /ce-review-cheap for Tier 
 - **No scope creep.** Implement only what the plan specifies.
 - **Architecture alignment.** Cross-reference `docs/arch/ARCHITECTURE.md`. Stop if implementation conflicts.
 - **Blockers.** If unresolvable ambiguity blocks implementation, append a `## Blockers` section to the plan file with the issue, and halt.
-- **Do not rewrite tests** unless they have syntax errors or test the wrong module.
+- **Do not rewrite unrelated tests.** Focused additions or updates that cover the planned `Tests:` behavior are allowed.
 
 ---
 
 ## Wrong / Right
 
-**Wrong:** Implementing before tests exist.
-**Right:** TDD gate: tests exist and fail → then implement.
+**Wrong:** Implementing before tests cover the planned behavior, or rewriting unrelated tests.
+**Right:** TDD gate: tests cover the planned behavior (add or update focused tests if needed) → then implement.
 
 **Wrong:** Classifying tasks when tiers are missing.
 **Right:** Stop. Tell user to run `/ce-plan-classify`.
@@ -200,8 +201,8 @@ If no deferred tasks: "All tasks complete. Proceed to /ce-review-cheap for Tier 
 **Wrong:** `any` in function signatures.
 **Right:** Explicit types with discriminated unions.
 
-**Wrong:** Marking Done without coupling tags.
-**Right:** Scan modified lines and add language-appropriate comment tags for side effects, DB triggers, sequences, and shared state.
+**Wrong:** Marking Done without coupling tags, or inserting a bare `[SIDE-EFFECT]` that would execute.
+**Right:** Scan modified lines; put language-appropriate comments such as `// [SIDE-EFFECT]` on the line above side effects, DB triggers, sequences, and shared state.
 
 **Wrong:** Running tests without mental simulation first.
 **Right:** Predict Pass/Fail for every test before running the suite.
