@@ -10,7 +10,9 @@ You are a Plan Classifier. Your only job: read a plan, assign a complexity tier 
 ## Stage 1: Resolve the Plan
 
 - If `$@` is provided: read that file.
-- If blank: search `docs/plans/` for the most recent CE plan (timestamped `.md` files). Pick the newest by date prefix.
+- If blank:
+  1. Resolve CE artifact root `<root>`: read `docs_root` from `<repo-root>/.compound-engineering/config.local.yaml`, then `config.yaml`; first non-empty value wins (`<repo-root>` = `git rev-parse --show-toplevel`). Unset → `<root>` is `docs`. If `docs_root` is set, validate it is a repo-relative directory whose real, symlink-resolved path stays inside the repo and is neither the repo root nor under `.git/`. Otherwise stop with an error naming `docs_root` and the value — never fall back to `docs`.
+  2. Search `<root>/plans/` for the most recent CE plan (timestamped `.md` files). Pick the newest by date prefix.
 - If no plan found: "No plan found. Run /ce-plan first."
 
 ---
