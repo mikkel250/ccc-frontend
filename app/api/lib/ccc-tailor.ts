@@ -18,10 +18,12 @@ export type TailorDeps = {
   fetchImpl?: typeof fetch;
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
+  clientIp?: string | undefined;
 };
 
 const GENERIC_ERROR = "Tailor request failed. Please try again.";
 const MISSING_ENV = "Tailor service is not configured.";
+export const TRUSTED_CCC_CLIENT_IP = "127.0.0.1";
 
 function clientSafeError(raw: unknown): string {
   if (typeof raw === "string" && raw.trim() && !/bearer|api[_-]?key|tailor_api/i.test(raw)) {
@@ -53,6 +55,7 @@ export async function tailorOnDemand(
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const clientIp = deps.clientIp?.trim() || TRUSTED_CCC_CLIENT_IP;
   let response: Response;
   try {
     response = await fetchImpl(`${apiUrl}/api/tailor-cv`, {
@@ -60,6 +63,7 @@ export async function tailorOnDemand(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        "x-forwarded-for": clientIp,
       },
       body: JSON.stringify({
         jobDescription: jd,

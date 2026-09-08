@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { tailorOnDemand } from "../app/api/lib/ccc-tailor";
+import { handleTailorPost } from "../app/api/lib/tailor-post";
 
 describe("tailorOnDemand", () => {
   it("rejects empty JD without fetching", async () => {
@@ -44,6 +45,7 @@ describe("tailorOnDemand", () => {
         assert.equal(String(input), "http://ccc.test/api/tailor-cv");
         const headers = new Headers(init?.headers);
         assert.equal(headers.get("Authorization"), "Bearer secret-key-value");
+        assert.equal(headers.get("x-forwarded-for"), "127.0.0.1");
         const body = JSON.parse(String(init?.body));
         assert.equal(body.curationMode, "strict");
         assert.equal(body.jobDescription, "Senior engineer JD");
@@ -88,5 +90,108 @@ describe("tailorOnDemand", () => {
     if (!result.ok) {
       assert.equal(/bearer|tailor_api/i.test(result.error), false);
     }
+  });
+
+  it("maps CCC 422 to a client-safe error", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      fetchImpl: async () =>
+        Response.json({ error: "Curator output was not valid JSON" }, { status: 422 }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 422);
+      assert.equal(result.error, "Curator output was not valid JSON");
+    }
+  });
+});
+
+describe("handleTailorPost", () => {
+  it("returns 401 and does not call CCC when there is no session", async () => {
+    let fetched = false;
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.9",
+        },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => null,
+        tailor: async () => {
+          fetched = true;
+          return { ok: true, cv: "nope", replyText: null };
+        },
+      }
+    );
+    assert.equal(response.status, 401);
+    assert.equal(fetched, false);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(typeof body.error, "string");
+    assert.equal(/secret|key|bearer/i.test(body.error ?? ""), false);
+  });
+
+  it("calls tailor when a session is present and does not copy inbound XFF", async () => {
+    let seenIp: string | undefined;
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.9",
+        },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async (_jd, deps) => {
+          seenIp = deps?.clientIp;
+          return { ok: true, cv: "UEsDbA==", replyText: "Hi" };
+        },
+      }
+    );
+    assert.equal(response.status, 200);
+    assert.equal(seenIp, "127.0.0.1");
+    const body = (await response.json()) as { cv?: string };
+    assert.equal(body.cv, "UEsDbA==");
+  });
+
+  it("returns 400 for invalid JSON", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not-json",
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => {
+          throw new Error("should not tailor");
+        },
+      }
+    );
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Invalid JSON.");
+  });
+
+  it("maps CCC 401 to 502 so session 401 stays unique", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => ({ ok: false, status: 401, error: "Unauthorized" }),
+      }
+    );
+    assert.equal(response.status, 502);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Unauthorized");
   });
 });
