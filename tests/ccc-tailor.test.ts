@@ -194,4 +194,21 @@ describe("handleTailorPost", () => {
     const body = (await response.json()) as { error?: string };
     assert.equal(body.error, "Unauthorized");
   });
+
+  it("maps CCC 403 to 502 so upstream auth errors are not confused with session 401", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => ({ ok: false, status: 403, error: "Forbidden" }),
+      }
+    );
+    assert.equal(response.status, 502);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Forbidden");
+  });
 });
