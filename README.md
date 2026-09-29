@@ -25,7 +25,7 @@ npx prisma migrate deploy
 npm run dev
 ```
 
-This app defaults to port **3000**. Run CCC on **3001** (or set `CCC_API_URL`). Postgres is bound to **127.0.0.1:5432**.
+`npm run dev` binds to **127.0.0.1** so the signed-in tailor proxy is not exposed on the LAN. This app defaults to port **3000**. Run CCC on **3001** (or set `CCC_API_URL`). Postgres is bound to **127.0.0.1:5432**.
 
 ```bash
 # in the CCC repo

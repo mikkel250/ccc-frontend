@@ -1,0 +1,350 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Canonical CodeRabbit config (repo file = backup / paste source for the UI).
+# Scoped to the Free plan. Do not add paid-only keys — the UI will reject or
+# ignore them.
+#
+# Free GitHub PRs are summarization-only. Full reviews run in the VS Code
+# extension and CLI (path_instructions apply there). Mechanical gates remain
+# npm test, npm run lint, and npm run build.
+#
+# Omitted on purpose (paid): pre-merge checks, linter/SAST tools,
+# knowledge-base mappings, MCP, code_generation (test-gen path instructions).
+# Finishing touches are listed only to force their defaults off — several
+# default to true and the UI then refuses to save on Free.
+# Slop detection stays — public repos get it on all plans.
+#
+# This repo is the on-demand UI + Kanban. Companion CCC owns the tailor API,
+# Master CV, curator pipeline, tracing, and Gmail inbox. Do not review this
+# diff as that API. docs/api/API.md is a consumer mirror, not a route map.
+
+language: en-US
+enable_free_tier: true
+tone_instructions: >-
+  Terse and evidence-first. Cite file and function. Do not restate ESLint or tsc findings. No filler praise. Prefer one high-confidence issue over five speculative nits.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: false
+  high_level_summary_instructions: >-
+    Summarize architectural, security, and contract risks only. Skip style and optional refactors. Explicitly call out any browser call to CCC, NEXT_PUBLIC_ secret, session bypass on tailor or jobs, job query missing userId, inbound X-Forwarded-For copied to CCC, curationMode other than strict, or Gmail/inbox/Master CV/LLM pipeline added in this repo. If the PR is docs-only, say so in one line.
+
+  poem: false
+  in_progress_fortune: false
+  review_status: true
+  review_details: true
+  enable_prompt_for_ai_agents: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: false
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  abort_on_close: true
+
+  slop_detection:
+    enabled: true
+    # Default skips repo owners; this repo is primarily LLM-authored by the owner.
+    include_all_authors: true
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    drafts: false
+
+  finishing_touches:
+    unit_tests:
+      enabled: false
+    docstrings:
+      enabled: false
+    autofix:
+      enabled: false
+    simplify:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/.next/**"
+    - "!**/node_modules/**"
+    - "!**/coverage/**"
+    - "!**/next-env.d.ts"
+
+  path_instructions:
+
+    - path: "**/*.{ts,tsx,mjs,js}"
+      instructions: |-
+        Assertive gate for a primarily LLM-generated Next.js UI. Prefer fewer
+        high-confidence findings over speculative style nits.
+
+        This is Next.js 15 App Router, React 19, Tailwind 4. It is a product
+        UI plus a thin BFF. Do not review it as the CCC tailor API, and do not
+        ask for Pages Router, a component library, or a second backend.
+
+        REAL MODULES (use these names; do not invent layers):
+        - Tailor BFF: `app/api/tailor/route.ts` (thin), `handleTailorPost` in
+          `app/api/lib/tailor-post.ts`, `tailorOnDemand` in
+          `app/api/lib/ccc-tailor.ts`
+        - Auth: `lib/auth.ts`, `lib/auth-client.ts`, `lib/session.ts`,
+          `lib/registration.ts`, `app/api/auth/[...all]/route.ts`,
+          `middleware.ts`
+        - Jobs: `lib/jobs.ts`, `app/actions/jobs.ts`, `lib/prisma.ts`,
+          `prisma/schema.prisma`
+        - UI: `app/page.tsx` + `app/tailor-form.tsx`, `app/board/page.tsx` +
+          `app/board/kanban-board.tsx`, `app/login/**`, `app/register/**`
+        - Env catalog: `.env.example` (there is no `lib/env.ts`)
+
+        OUT OF SCOPE — do not reintroduce from companion CCC or from
+        docs/api/API.md:
+        curator/`chat()`, Master CV load, Ajv, docx builder, Langfuse/tracing,
+        provider routing, Upstash rate limits, Gmail/inbox, Railway,
+        `TAILOR_AUTH_INSECURE_BYPASS`, Gantt, nudges.
+
+        VIBECODING FAILURES TO PRIORITIZE
+        - Plausible but incomplete implementations; TODOs/stubs in production
+        - Swallowed errors, empty catch, ignored promises, generic success
+        - Duplicate logic next to an existing helper (80% overlap → extend)
+        - Accidental complexity, unused extension points, speculative frameworks
+        - Tests that assert "does not throw" or mock away the behavior under test
+        - A second CCC client, client-side fetch of CCC, or a new LLM call
+        - Job reads/writes that omit `userId`
+        - Secrets in client components, `NEXT_PUBLIC_*`, or error strings
+
+        TYPESCRIPT (second line of defense)
+        `strict` lives in tsconfig. ESLint is `next/core-web-vitals` and
+        `next/typescript` only. Do not restate those as primary findings.
+        Flag remaining fake type safety ESLint cannot see: `as SomeType` /
+        `as unknown as` on external JSON (request bodies, CCC payloads, form
+        fields) instead of a narrowing check or Zod. The Prisma store cast in
+        `getDb` is the existing test seam — do not grow new casts beside it.
+
+        Prefer discriminated unions (`{ ok: true } | { ok: false }`).
+        HTTP status mapping for tailor belongs in `handleTailorPost`. Do not
+        add new HTTP-shaped objects in `lib/jobs.ts` or client components.
+
+        SECURITY
+        Never hardcode or log `TAILOR_API_KEY`, `BETTER_AUTH_SECRET`,
+        `DATABASE_URL`, passwords, or session tokens. Job descriptions and
+        notes are career PII — do not put them in client-visible error
+        strings beyond what the operator just typed.
+        `"use client"` files (`tailor-form`, `kanban-board`, login/register
+        forms, `sign-out-button`) must not import `tailorOnDemand`, `prisma`,
+        `lib/auth.ts`, or read server env. `kanban-board` may import pure
+        exports from `lib/jobs.ts` (`JOB_STATUSES`, `isJobStatus`, types).
+        Do not add Prisma or secret reads to that module's client graph.
+
+        ASYNC
+        Bound the CCC `fetch` (timeout/AbortSignal). Do not retry tailor,
+        auth, or validation failures. `retryPositionConflict` retries only
+        Prisma `P2002` on job position allocation — do not extend it to HTTP.
+        This app is a normal Node server. Do not add Edge constraints to the
+        tailor route. Middleware stays Edge-safe: `getSessionCookie` only.
+
+        CONFIG
+        New env vars must be catalogued in `.env.example` with a comment.
+        Read them on the server. Do not invent a provider/model config layer.
+
+    - path: "app/api/**/route.ts"
+      instructions: |-
+        Production HTTP handlers. Today: `POST /api/tailor` and Better Auth
+        `GET`/`POST` at `app/api/auth/[...all]/route.ts`.
+
+        TAILOR
+        - `app/api/tailor/route.ts` stays a one-line mapper to
+          `handleTailorPost`. Pipeline logic does not belong in the route file.
+        - Session check BEFORE any CCC call. No session → 401
+          "Sign in required." and no `fetch`.
+        - Never copy inbound `X-Forwarded-For`, `X-Real-IP`, or
+          `x-vercel-forwarded-for`. CCC sees `TRUSTED_CCC_CLIENT_IP`
+          (`127.0.0.1`) only.
+        - Map CCC 401 and 403 to 502 so a session 401 stays distinct.
+          Do not "fix" that by passing 401 through.
+        - Success JSON is `{ cv, replyText }` only. Strip `curatedJson`,
+          `coverLetter`, `usage`, `model`, rate-limit fields, and the Bearer key.
+        - Invalid JSON → 400. Do not leak stacks or upstream secrets.
+        - Do not add an unauthenticated alias of this route.
+
+        AUTH HANDLER
+        - `toNextJsHandler(auth)` only. Do not put tailor or job logic here.
+        - Do not disable the first-operator registration plugin.
+
+    - path: "{app/api/lib/ccc-tailor.ts,app/api/lib/tailor-post.ts,app/api/tailor/route.ts,app/tailor-form.tsx,app/page.tsx}"
+      instructions: |-
+        This app is a Bearer presenter, not the curator.
+
+        `tailorOnDemand` is the only CCC client. It POSTs
+        `${CCC_API_URL}/api/tailor-cv` with
+        `Authorization: Bearer <TAILOR_API_KEY>` and `curationMode: "strict"`.
+        The browser posts `{ jobDescription }` to `/api/tailor` only.
+
+        REJECT
+        - Calling CCC from a client component or with `NEXT_PUBLIC_CCC_API_URL`
+        - `curationMode: "flexible"`, cover-letter UI, or a second LLM hop
+        - Omitting the session gate in `handleTailorPost`
+        - Forwarding the browser IP or a client-supplied IP to CCC
+        - Returning CCC's raw body to the browser
+        - Echoing errors that match `/bearer|api[_-]?key|tailor_api/i`
+          (`clientSafeError` already replaces those)
+        - A fallback when `CCC_API_URL` or `TAILOR_API_KEY` is missing.
+          Fail closed with 503 "Tailor service is not configured."
+        - Writing the `.docx` to disk. `cv` stays base64 in the JSON response
+          for the browser download.
+
+        `app/page.tsx` calls `requireSessionUserId()` (redirect to `/login`).
+        Middleware does not match `/`. Do not remove the page-level check
+        because middleware exists for `/board`.
+
+        JD cap is `JD_MAX_CHARS` (50000) in `ccc-tailor.ts`, before fetch.
+        Empty JD is 400 and does not call CCC.
+
+    - path: "{lib/auth.ts,lib/auth-client.ts,lib/session.ts,lib/registration.ts,middleware.ts,app/api/auth/**,app/login/**,app/register/**,app/sign-out-button.tsx}"
+      instructions: |-
+        Better Auth email/password, Prisma adapter, HttpOnly session cookie.
+        `lib/auth-client.ts` is `createAuthClient()` with no secrets.
+
+        REGISTRATION
+        Public sign-up is open only when no user exists, unless
+        `ALLOW_REGISTRATION` is the string `"true"`.
+        `firstOperatorRegistration` claims `registrationClaim` id
+        `FIRST_OPERATOR_CLAIM_ID` (1) inside the user-create hook for
+        `/sign-up/email`. A failed claim is 403 "Registration is closed."
+        Do not allow a second public user by catching that error and
+        continuing. Do not add OAuth, email verification, or password reset
+        unless the plan says so.
+
+        SESSION
+        - `getSessionUserId` / `requireSessionUserId` / `redirectIfSignedIn`
+          are the session API. `requireSessionUserId` redirects to `/login`.
+        - Server Actions and pages use that helper. Do not trust a user id
+          from form data, search params, or the client.
+        - `middleware.ts` matcher is `/board` only, and it may use
+          `getSessionCookie` only. Do not import `prisma` or `lib/auth.ts`
+          into middleware (Edge). A cookie check is not a substitute for
+          `requireSessionUserId` on actions or for the 401 on `POST /api/tailor`.
+
+        `BETTER_AUTH_URL` must be the browser origin (`trustedOrigins` is that
+        origin). `BETTER_AUTH_SECRET` stays server-only. Login and register
+        pages must not mention `TAILOR_API_KEY`.
+
+    - path: "{lib/jobs.ts,lib/prisma.ts,app/actions/jobs.ts,app/board/**,prisma/schema.prisma}"
+      instructions: |-
+        Jobs are per signed-in user. Isolation is in the data access layer,
+        not only in the UI.
+
+        SCHEMA
+        `JobStatus`: `applied | interview | offer | rejected`. Unique
+        `(userId, status, position)`. `onDelete: Cascade` from User.
+        `appliedAt` defaults to now. Do not add Gantt or nudge tables.
+        Do not take `userId` or `position` from the client.
+        Pin Prisma 6 (`prisma-client-js`). Do not adopt Prisma 7 driver adapters.
+
+        DAL (`lib/jobs.ts`)
+        - Every find/update/delete includes `where: { userId }`.
+          `updateMany` / `deleteMany` with `userId`; count 0 is
+          `{ ok: false, code: "not_found" }`.
+        - Position is `max(position)+1` in that user's target column, inside
+          the same transaction, retried only on `P2002`.
+        - Zod: company/title trimmed, 1–200 chars; URL `http:` or `https:` or
+          empty; notes ≤ 4000. Client errors stay generic
+          ("Check the company, title, URL, and notes."). Do not echo Zod
+          issue paths that include note text.
+        - Empty `userId` is `invalid` / "Sign in required." and does not query.
+
+        ACTIONS (`app/actions/jobs.ts`)
+        `requireSessionUserId()` before `createJob` / `updateJob` / `deleteJob`.
+        Then `revalidatePath("/board")`. No session must not write a row.
+
+        UI
+        `app/board/page.tsx` loads via `listJobs(userId)` after
+        `requireSessionUserId`. `KanbanBoard` mutates only through those
+        actions. Four columns. Do not add a drag-and-drop dependency unless
+        the change is explicitly that. Do not persist tailor `cv` / `replyText`
+        onto a job.
+
+        PRISMA
+        Singleton on `globalThis` via `getPrisma`. Do not construct extra
+        clients per request. Do not log `DATABASE_URL`.
+
+    - path: "tests/**"
+      instructions: |-
+        Tests are in review scope. Review them as verification, not filler.
+
+        `npm test` is `tsx --test tests/**/*.test.ts` with `node:test` and
+        `node:assert/strict`. Do not add Jest, Vitest, or Sinon.
+        Inject deps (`fetchImpl`, `TailorPostDeps`, `JobDeps`, session
+        lookups). Do not require live Postgres, CCC, or an LLM.
+        Assert status, union fields, and side effects (fetch not called,
+        row unchanged). Reject tests that only prove "does not throw".
+        Await async work. No sleep-based assertions.
+
+        Cover: missing session does not call CCC; spoofed inbound
+        X-Forwarded-For is not forwarded; CCC 401 becomes 502 at
+        `handleTailorPost`; secret-like error strings are stripped; two user
+        ids cannot read or mutate each other's jobs; registration stays closed
+        after the first user unless `ALLOW_REGISTRATION=true`.
+
+        There is no Playwright suite and no `npm run smoke` in this repo.
+        Do not add a live-LLM test to `npm test`.
+
+    - path: "{package.json,.nvmrc,tsconfig.json,next.config.ts,eslint.config.mjs,docker-compose.yml,postcss.config.mjs}"
+      instructions: |-
+        Deployment-critical. Node ≥22 (`.nvmrc` 22), npm, TypeScript strict,
+        Next 15 App Router, React 19, Tailwind 4.
+
+        `build` is `prisma generate && next build --turbopack`. `postinstall`
+        is `prisma generate`. `test` is `tsx --test tests/**/*.test.ts`.
+        Do not silently change `test`, `lint`, `build`, or `start`.
+
+        Postgres is local Docker Compose: image `postgres:16`, published on
+        `127.0.0.1:5432` only, database `ccc_frontend`. Do not publish
+        Postgres on `0.0.0.0`. Do not commit a real `BETTER_AUTH_SECRET` or
+        `TAILOR_API_KEY`.
+
+        Do not add an Edge runtime to `/api/tailor`. Do not swap `node:test`
+        for another runner. `react` is the product UI — review components as
+        UI, not as an accidental Next dependency.
+
+    - path: ".env.example"
+      instructions: |-
+        `.env.example` is the env catalog. New vars need a comment and a
+        safe placeholder. Current server vars: `CCC_API_URL`, `TAILOR_API_KEY`,
+        `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+        `ALLOW_REGISTRATION`.
+
+        No fake default for `TAILOR_API_KEY` or `BETTER_AUTH_SECRET`.
+        Do not add `NEXT_PUBLIC_` aliases for those. `ALLOW_REGISTRATION`
+        documents the closed-by-default posture (`false` unless exactly
+        `"true"`). `BETTER_AUTH_URL` is the browser origin, not the CCC URL.
+        `CCC_API_URL` points at the companion API (local CCC on port 3001
+        while this app uses 3000).
+
+    - path: "{docs/**/*.md,AGENTS.md,CLAUDE.md,CODEX.md,STRATEGY.md,CONCEPTS.md,README.md}"
+      instructions: |-
+        Flag documentation that contradicts runtime code (session gate,
+        strict-only tailor, trusted CCC IP, first-operator registration,
+        job isolation, env names). Prefer `app/api/lib/**`, `lib/**`,
+        `prisma/schema.prisma`, and `.env.example` over stale plan notes.
+
+        `docs/api/API.md` describes the companion CCC API (Bearer on
+        `/api/tailor-cv`, rate limits, Gmail CLIs, `/api/hello`). Those routes
+        are not implemented here. Do not treat that file as a list of missing
+        frontend endpoints.
+
+        Gmail/inbox, Master CV ownership, curator loops, LLM-as-judge,
+        `flexible` as the commercial path, multi-tenant BYOK, Gantt, and
+        nudges are not current behavior — do not reintroduce them via
+        "docs say so". STRATEGY.md in this repo is the frontend deny-list.
+        Milestone status lives in `docs/plans/README.md`.
+        Skip grammar/style nits. Do not treat AGENTS.md Drain/CE workflow
+        as product architecture.
+
+chat:
+  art: false
+  auto_reply: true

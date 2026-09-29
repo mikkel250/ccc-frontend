@@ -1,3 +1,10 @@
+import {
+  cccFetchTimeoutMs,
+  GENERIC_ERROR,
+  MISSING_ENV,
+  TRUSTED_CCC_CLIENT_IP,
+} from "../../lib/tailor-constants";
+
 export const JD_MAX_CHARS = 50_000;
 
 export type TailorSuccess = {
@@ -18,18 +25,59 @@ export type TailorDeps = {
   fetchImpl?: typeof fetch;
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
-  clientIp?: string | undefined;
+  timeoutMs?: number | undefined;
 };
 
-const GENERIC_ERROR = "Tailor request failed. Please try again.";
-const MISSING_ENV = "Tailor service is not configured.";
-export const TRUSTED_CCC_CLIENT_IP = "127.0.0.1";
+const SECRET_SUBSTRING_LEN = 8;
 
-function clientSafeError(raw: unknown): string {
-  if (typeof raw === "string" && raw.trim() && !/bearer|api[_-]?key|tailor_api/i.test(raw)) {
-    return raw.trim();
+export function resolveCccFetchTimeoutMs(
+  deps: Pick<TailorDeps, "timeoutMs"> = {},
+  env: NodeJS.ProcessEnv = process.env
+): number {
+  if (typeof deps.timeoutMs === "number" && Number.isFinite(deps.timeoutMs) && deps.timeoutMs > 0) {
+    return cccFetchTimeoutMs(deps.timeoutMs);
   }
-  return GENERIC_ERROR;
+  const fromEnv = Number(env.CCC_FETCH_TIMEOUT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return cccFetchTimeoutMs(fromEnv);
+  }
+  return cccFetchTimeoutMs(undefined);
+}
+
+function errorContainsSecret(raw: string, secret: string | undefined): boolean {
+  if (!secret) {
+    return false;
+  }
+  if (raw.includes(secret)) {
+    return true;
+  }
+  if (secret.length < SECRET_SUBSTRING_LEN) {
+    return false;
+  }
+  for (let i = 0; i <= secret.length - SECRET_SUBSTRING_LEN; i++) {
+    if (raw.includes(secret.slice(i, i + SECRET_SUBSTRING_LEN))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function clientSafeError(raw: unknown, apiKey?: string): string {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return GENERIC_ERROR;
+  }
+  const trimmed = raw.trim();
+  if (errorContainsSecret(trimmed, apiKey) || /bearer|api[_-]?key|tailor_api/i.test(trimmed)) {
+    return GENERIC_ERROR;
+  }
+  return trimmed;
+}
+
+function isTimeoutOrAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("name" in error)) {
+    return false;
+  }
+  return error.name === "TimeoutError" || error.name === "AbortError";
 }
 
 export async function tailorOnDemand(
@@ -55,7 +103,6 @@ export async function tailorOnDemand(
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const clientIp = deps.clientIp?.trim() || TRUSTED_CCC_CLIENT_IP;
   let response: Response;
   try {
     response = await fetchImpl(`${apiUrl}/api/tailor-cv`, {
@@ -63,14 +110,18 @@ export async function tailorOnDemand(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        "x-forwarded-for": clientIp,
+        "x-forwarded-for": TRUSTED_CCC_CLIENT_IP,
       },
       body: JSON.stringify({
         jobDescription: jd,
         curationMode: "strict",
       }),
+      signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps)),
     });
-  } catch {
+  } catch (error) {
+    if (isTimeoutOrAbortError(error)) {
+      return { ok: false, status: 504, error: GENERIC_ERROR };
+    }
     return { ok: false, status: 503, error: GENERIC_ERROR };
   }
 
@@ -86,7 +137,7 @@ export async function tailorOnDemand(
     return {
       ok: false,
       status: response.status,
-      error: clientSafeError(record.error),
+      error: clientSafeError(record.error, apiKey),
     };
   }
 
