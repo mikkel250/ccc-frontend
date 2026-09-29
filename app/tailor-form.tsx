@@ -19,6 +19,27 @@ function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
 }
 
+async function readTailorResponse(response: Response): Promise<TailorResponse> {
+  try {
+    const parsed: unknown = await response.json();
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    const record = parsed as Record<string, unknown>;
+    return {
+      cv: typeof record.cv === "string" ? record.cv : undefined,
+      replyText:
+        typeof record.replyText === "string" || record.replyText === null ? record.replyText : undefined,
+      error: typeof record.error === "string" ? record.error : undefined,
+    };
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return {};
+  }
+}
+
 export function TailorForm() {
   const [jobDescription, setJobDescription] = useState("");
   const [operatorToken, setOperatorToken] = useState("");
@@ -82,12 +103,13 @@ export function TailorForm() {
         body: JSON.stringify({ jobDescription: jd }),
         signal: controller.signal,
       });
-      const body = (await response.json()) as TailorResponse;
+      const body = await readTailorResponse(response);
       if (!mountedRef.current) {
         return;
       }
       if (!response.ok) {
-        setError(body.error || GENERIC_ERROR);
+        const fallback = response.status === 504 ? TIMEOUT_ERROR : GENERIC_ERROR;
+        setError(body.error?.trim() || fallback);
         return;
       }
       if (!body.cv) {

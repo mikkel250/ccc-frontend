@@ -20,10 +20,11 @@ export function authorizeOperator(
 ): OperatorAuthResult {
   const expected = env.OPERATOR_TOKEN?.trim() ?? "";
   if (!expected) {
-    if (env.NODE_ENV === "production") {
-      return { ok: false, status: 503, error: MISSING_ENV };
+    // `next dev` only. Preview, test, staging, and production stay closed.
+    if (env.NODE_ENV === "development") {
+      return { ok: true };
     }
-    return { ok: true };
+    return { ok: false, status: 503, error: MISSING_ENV };
   }
 
   const provided = request.headers.get(OPERATOR_TOKEN_HEADER) ?? "";

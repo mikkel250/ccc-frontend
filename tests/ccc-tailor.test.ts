@@ -1,7 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { clientSafeError, JD_MAX_CHARS, tailorOnDemand } from "../app/api/lib/ccc-tailor";
-import { GENERIC_ERROR, MISSING_ENV, TRUSTED_CCC_CLIENT_IP } from "../app/lib/tailor-constants";
+import {
+  clientSafeError,
+  JD_MAX_CHARS,
+  resolveCccFetchTimeoutMs,
+  tailorOnDemand,
+} from "../app/api/lib/ccc-tailor";
+import {
+  DEFAULT_CCC_FETCH_TIMEOUT_MS,
+  GENERIC_ERROR,
+  MAX_CCC_FETCH_TIMEOUT_MS,
+  MISSING_ENV,
+  TRUSTED_CCC_CLIENT_IP,
+} from "../app/lib/tailor-constants";
 
 function abortingFetch(): typeof fetch {
   return ((_input, init) =>
@@ -27,6 +38,22 @@ function abortingFetch(): typeof fetch {
       signal.addEventListener("abort", abort, { once: true });
     })) as typeof fetch;
 }
+
+describe("resolveCccFetchTimeoutMs", () => {
+  it("clamps CCC_FETCH_TIMEOUT_MS below the route maxDuration", () => {
+    assert.equal(
+      resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "999999" }),
+      MAX_CCC_FETCH_TIMEOUT_MS
+    );
+    assert.equal(
+      resolveCccFetchTimeoutMs({ timeoutMs: 20 }, { CCC_FETCH_TIMEOUT_MS: "999999" }),
+      20
+    );
+    assert.equal(resolveCccFetchTimeoutMs({ timeoutMs: 999_999 }, {}), MAX_CCC_FETCH_TIMEOUT_MS);
+    assert.equal(resolveCccFetchTimeoutMs({}, {}), DEFAULT_CCC_FETCH_TIMEOUT_MS);
+    assert.ok(DEFAULT_CCC_FETCH_TIMEOUT_MS <= MAX_CCC_FETCH_TIMEOUT_MS);
+  });
+});
 
 describe("tailorOnDemand", () => {
   it("rejects empty JD without fetching", async () => {
@@ -148,34 +175,18 @@ describe("tailorOnDemand", () => {
     }
   });
 
-  it("sends an explicit clientIp as x-forwarded-for after trimming", async () => {
+  it("always forwards TRUSTED_CCC_CLIENT_IP", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
       apiKey: "secret-key-value",
-      clientIp: "  203.0.113.10  ",
       fetchImpl: async (_input, init) => {
         const headers = new Headers(init?.headers);
-        assert.equal(headers.get("x-forwarded-for"), "203.0.113.10");
+        assert.equal(headers.get("x-forwarded-for"), TRUSTED_CCC_CLIENT_IP);
+        assert.equal(headers.get("x-forwarded-for"), "127.0.0.1");
         return Response.json({ cv: "UEsDbA==", replyText: "Thanks." });
       },
     });
     assert.equal(result.ok, true);
-  });
-
-  it("falls back to TRUSTED_CCC_CLIENT_IP when clientIp is blank or not an IP", async () => {
-    for (const clientIp of ["   ", "not-an-ip", "203.0.113.10\r\nX-Evil: 1"]) {
-      const result = await tailorOnDemand("Senior engineer JD", {
-        apiUrl: "http://ccc.test",
-        apiKey: "secret-key-value",
-        clientIp,
-        fetchImpl: async (_input, init) => {
-          const headers = new Headers(init?.headers);
-          assert.equal(headers.get("x-forwarded-for"), TRUSTED_CCC_CLIENT_IP);
-          return Response.json({ cv: "UEsDbA==", replyText: "Thanks." });
-        },
-      });
-      assert.equal(result.ok, true);
-    }
   });
 
   it("maps CCC 401 to a client-safe error", async () => {

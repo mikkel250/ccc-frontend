@@ -1,6 +1,5 @@
-import { isIP } from "node:net";
 import {
-  DEFAULT_CCC_FETCH_TIMEOUT_MS,
+  cccFetchTimeoutMs,
   GENERIC_ERROR,
   MISSING_ENV,
   TRUSTED_CCC_CLIENT_IP,
@@ -26,21 +25,23 @@ export type TailorDeps = {
   fetchImpl?: typeof fetch;
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
-  clientIp?: string | undefined;
   timeoutMs?: number | undefined;
 };
 
 const SECRET_SUBSTRING_LEN = 8;
 
-function resolveTimeoutMs(deps: TailorDeps): number {
+export function resolveCccFetchTimeoutMs(
+  deps: Pick<TailorDeps, "timeoutMs"> = {},
+  env: NodeJS.ProcessEnv = process.env
+): number {
   if (typeof deps.timeoutMs === "number" && Number.isFinite(deps.timeoutMs) && deps.timeoutMs > 0) {
-    return deps.timeoutMs;
+    return cccFetchTimeoutMs(deps.timeoutMs);
   }
-  const fromEnv = Number(process.env.CCC_FETCH_TIMEOUT_MS);
+  const fromEnv = Number(env.CCC_FETCH_TIMEOUT_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) {
-    return fromEnv;
+    return cccFetchTimeoutMs(fromEnv);
   }
-  return DEFAULT_CCC_FETCH_TIMEOUT_MS;
+  return cccFetchTimeoutMs(undefined);
 }
 
 function errorContainsSecret(raw: string, secret: string | undefined): boolean {
@@ -70,14 +71,6 @@ export function clientSafeError(raw: unknown, apiKey?: string): string {
     return GENERIC_ERROR;
   }
   return trimmed;
-}
-
-function resolvedClientIp(raw: string | undefined): string {
-  const trimmed = raw?.trim();
-  if (trimmed && isIP(trimmed)) {
-    return trimmed;
-  }
-  return TRUSTED_CCC_CLIENT_IP;
 }
 
 function isTimeoutOrAbortError(error: unknown): boolean {
@@ -110,7 +103,6 @@ export async function tailorOnDemand(
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const clientIp = resolvedClientIp(deps.clientIp);
   let response: Response;
   try {
     response = await fetchImpl(`${apiUrl}/api/tailor-cv`, {
@@ -118,13 +110,13 @@ export async function tailorOnDemand(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        "x-forwarded-for": clientIp,
+        "x-forwarded-for": TRUSTED_CCC_CLIENT_IP,
       },
       body: JSON.stringify({
         jobDescription: jd,
         curationMode: "strict",
       }),
-      signal: AbortSignal.timeout(resolveTimeoutMs(deps)),
+      signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps)),
     });
   } catch (error) {
     if (isTimeoutOrAbortError(error)) {

@@ -17,12 +17,20 @@ describe("authorizeOperator", () => {
     assert.deepEqual(result, { ok: true });
   });
 
-  it("fails closed in production when OPERATOR_TOKEN is unset", () => {
-    const result = authorizeOperator(requestWithToken(), { NODE_ENV: "production" });
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.equal(result.status, 503);
-      assert.equal(result.error, MISSING_ENV);
+  it("fails closed outside development when OPERATOR_TOKEN is unset", () => {
+    const envs: NodeJS.ProcessEnv[] = [
+      { NODE_ENV: "production" },
+      { NODE_ENV: "test" },
+      { NODE_ENV: "staging" },
+      {},
+    ];
+    for (const env of envs) {
+      const result = authorizeOperator(requestWithToken(), env);
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.status, 503);
+        assert.equal(result.error, MISSING_ENV);
+      }
     }
   });
 
