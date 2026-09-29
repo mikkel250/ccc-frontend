@@ -1,6 +1,9 @@
 import { TailorForm } from "./tailor-form";
+import { requireSessionUserId } from "@/lib/session";
 
-export default function Home() {
+export default async function Home() {
+  await requireSessionUserId();
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-8">
       <div>

@@ -37,8 +37,5 @@ export function cccFetchTimeoutMs(raw: number | undefined): number {
 /** UTF-8 worst case for JD_MAX_CHARS plus JSON envelope. */
 export const BODY_MAX_BYTES = 256 * 1024;
 
-export const OPERATOR_TOKEN_HEADER = "x-operator-token";
-export const OPERATOR_TOKEN_STORAGE_KEY = "ccc-operator-token";
-
 /** CCC tailor-cv rejects requests with no parseable client IP. */
 export const TRUSTED_CCC_CLIENT_IP = "127.0.0.1";

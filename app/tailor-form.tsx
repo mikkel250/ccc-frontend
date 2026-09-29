@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  CLIENT_FETCH_TIMEOUT_MS,
-  GENERIC_ERROR,
-  OPERATOR_TOKEN_HEADER,
-  OPERATOR_TOKEN_STORAGE_KEY,
-  TIMEOUT_ERROR,
-} from "./lib/tailor-constants";
+import { CLIENT_FETCH_TIMEOUT_MS, GENERIC_ERROR, TIMEOUT_ERROR } from "./lib/tailor-constants";
 
 type TailorResponse = {
   cv?: string;
@@ -42,7 +36,6 @@ async function readTailorResponse(response: Response): Promise<TailorResponse> {
 
 export function TailorForm() {
   const [jobDescription, setJobDescription] = useState("");
-  const [operatorToken, setOperatorToken] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cv, setCv] = useState<string | null>(null);
@@ -52,25 +45,11 @@ export function TailorForm() {
 
   useEffect(() => {
     mountedRef.current = true;
-    try {
-      setOperatorToken(sessionStorage.getItem(OPERATOR_TOKEN_STORAGE_KEY) ?? "");
-    } catch {
-      // sessionStorage can throw in locked-down browsers; the field still works.
-    }
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
     };
   }, []);
-
-  function persistOperatorToken(value: string) {
-    setOperatorToken(value);
-    try {
-      sessionStorage.setItem(OPERATOR_TOKEN_STORAGE_KEY, value);
-    } catch {
-      // Ignore quota / privacy-mode failures; the in-memory value is still sent.
-    }
-  }
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -92,14 +71,9 @@ export function TailorForm() {
     setCv(null);
     setReplyText(null);
     try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const token = operatorToken.trim();
-      if (token) {
-        headers[OPERATOR_TOKEN_HEADER] = token;
-      }
       const response = await fetch("/api/tailor", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobDescription: jd }),
         signal: controller.signal,
       });
@@ -141,18 +115,6 @@ export function TailorForm() {
           rows={16}
           className="rounded-md border border-neutral-300 bg-white p-3 font-mono text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
           placeholder="Paste the recruiter JD here"
-          disabled={pending}
-        />
-      </label>
-      <label className="flex flex-col gap-2 text-sm font-medium">
-        Operator token
-        <input
-          type="password"
-          autoComplete="off"
-          value={operatorToken}
-          onChange={(event) => persistOperatorToken(event.target.value)}
-          className="rounded-md border border-neutral-300 bg-white p-3 font-mono text-sm text-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
-          placeholder="Required when OPERATOR_TOKEN is set"
           disabled={pending}
         />
       </label>
