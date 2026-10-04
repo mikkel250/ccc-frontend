@@ -4,6 +4,7 @@ import {
   createJob,
   deleteJob,
   listJobs,
+  toBoardJob,
   updateJob,
   type JobRecord,
   type JobsStore,
@@ -373,6 +374,57 @@ describe("jobs isolation", () => {
         .map((job) => job.position),
       [0, 1, 2]
     );
+  });
+
+  it("rejects an invalid applied date on create", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", appliedAt: "not-a-date" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the applied date.");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects notes longer than 4000 characters", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", notes: "n".repeat(4001) },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects an empty job id on update", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    const result = await updateJob("user-a", "  ", { title: "New title" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Job is required.");
+    }
+    assert.equal(db.rows[0].title, "Engineer");
+  });
+
+  it("formats board jobs with a YYYY-MM-DD applied date", () => {
+    const boardJob = toBoardJob(
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        appliedAt: new Date("2026-09-07T15:30:00.000Z"),
+      })
+    );
+    assert.equal(boardJob.appliedAt, "2026-09-07");
   });
 
   it("retries a column move when its target position conflicts", async () => {
