@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getPrisma } from "./prisma";
 
@@ -30,7 +31,10 @@ type JobsTransactionStore = {
   job: {
     findMany: (args: {
       where: { userId: string; status?: JobStatus };
-      orderBy?: Array<Record<string, "asc" | "desc">>;
+      orderBy?: Array<{
+        status?: "asc" | "desc";
+        position?: "asc" | "desc";
+      }>;
     }) => Promise<JobRecord[]>;
     findFirst: (args: { where: { id: string; userId?: string } }) => Promise<JobRecord | null>;
     create: (args: { data: JobCreateData }) => Promise<JobRecord>;
@@ -54,6 +58,27 @@ export type JobsStore = JobsTransactionStore & {
 export type JobDeps = {
   db?: JobsStore;
 };
+
+type PrismaJobDelegate = PrismaClient["job"];
+
+function wrapJob(job: PrismaJobDelegate): JobsTransactionStore["job"] {
+  return {
+    findMany: (args) => job.findMany(args),
+    findFirst: (args) => job.findFirst(args),
+    create: (args) => job.create(args),
+    update: (args) => job.update(args),
+    updateMany: (args) => job.updateMany(args),
+    deleteMany: (args) => job.deleteMany(args),
+    aggregate: (args) => job.aggregate(args),
+  };
+}
+
+function jobsStoreFromPrisma(client: PrismaClient): JobsStore {
+  return {
+    job: wrapJob(client.job),
+    $transaction: (run) => client.$transaction((tx) => run({ job: wrapJob(tx.job) })),
+  };
+}
 
 export type JobFailure = {
   ok: false;
@@ -132,7 +157,7 @@ const createJobSchema = z.object({
 });
 
 function getDb(deps?: JobDeps): JobsStore {
-  return deps?.db ?? (getPrisma() as unknown as JobsStore);
+  return deps?.db ?? jobsStoreFromPrisma(getPrisma());
 }
 
 function requireUserId(userId: string): JobFailure | null {

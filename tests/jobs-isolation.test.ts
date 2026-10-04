@@ -4,6 +4,7 @@ import {
   createJob,
   deleteJob,
   listJobs,
+  toBoardJob,
   updateJob,
   type JobRecord,
   type JobsStore,
@@ -37,8 +38,8 @@ function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecor
           const keys = Array.isArray(orderBy) ? orderBy : [orderBy];
           result = [...result].sort((a, b) => {
             for (const key of keys) {
-              const field = Object.keys(key)[0] as keyof JobRecord | undefined;
-              if (!field) continue;
+              const field = Object.keys(key)[0];
+              if (field !== "status" && field !== "position") continue;
               const dir = key[field] === "desc" ? -1 : 1;
               const left = a[field];
               const right = b[field];
@@ -400,5 +401,39 @@ describe("jobs isolation", () => {
     assert.equal(attempts, 2);
     assert.equal(db.rows[0]?.status, "interview");
     assert.equal(db.rows[0]?.position, 0);
+  });
+});
+
+describe("toBoardJob", () => {
+  it("formats board jobs with a YYYY-MM-DD applied date", () => {
+    const boardJob = toBoardJob(
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        appliedAt: new Date("2026-09-07T15:30:00.000Z"),
+      })
+    );
+    assert.equal(boardJob.appliedAt, "2026-09-07");
+  });
+
+  it("uses the UTC calendar date near midnight when TZ is not UTC", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const boardJob = toBoardJob(
+        seedJob({
+          id: "a1",
+          userId: "user-a",
+          appliedAt: new Date("2026-09-07T23:30:00.000Z"),
+        })
+      );
+      assert.equal(boardJob.appliedAt, "2026-09-07");
+    } finally {
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
+    }
   });
 });
