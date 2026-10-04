@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { tailorOnDemand, TRUSTED_CCC_CLIENT_IP, type TailorDeps, type TailorResult } from "./ccc-tailor";
+import { tailorOnDemand, type TailorDeps, type TailorResult } from "./ccc-tailor";
+import { clientIpForCcc, type ClientIpEnv } from "./client-ip";
 import { getSessionUserId } from "@/lib/session";
 
 export type TailorPostDeps = {
   getSessionUserId?: () => Promise<string | null>;
   tailor?: (jobDescription: string, deps?: TailorDeps) => Promise<TailorResult>;
+  env?: ClientIpEnv;
 };
 
 export async function handleTailorPost(
@@ -30,7 +32,7 @@ export async function handleTailorPost(
   }
 
   const result = await (deps.tailor ?? tailorOnDemand)(jobDescription, {
-    clientIp: TRUSTED_CCC_CLIENT_IP,
+    clientIp: clientIpForCcc(request, deps.env),
   });
   if (!result.ok) {
     const status = result.status === 401 || result.status === 403 ? 502 : result.status;

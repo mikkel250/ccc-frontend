@@ -127,7 +127,7 @@ Product Contract preservation: new bootstrap contract (no upstream requirements-
 - KTD3. **`Job` belongs to Better Auth `User`.** Fields: `id`, `userId`, `company`, `title`, `url` (optional), `notes` (optional), `status` enum `applied | interview | offer | rejected`, `position` (int), `appliedAt` (`DateTime @default(now())`), `createdAt`, `updatedAt`. Unique constraint `(userId, status, position)`. Cascade delete with user. On create or column move, set `position` to `max(position)+1` in that user’s target column (or `0` if empty) in the same transaction as the insert/update, retrying unique-constraint conflicts so concurrent allocations remain atomic. Do not take `position` from the client.
 - KTD4. **Data access layer, not middleware-only authz.** `lib/session.ts` and `lib/jobs.ts` always `where: { userId }`. Job Server Actions: if session is null, `redirect('/login')` and do not call the DAL. HTTP 401 is for `POST /api/tailor` only. Zod: `http`/`https` URLs only; max lengths on company, title, notes; no client `userId`.
 - KTD5. **Kanban UI is a Server Component load plus a client board.** `app/board/page.tsx` loads jobs. Move control is a per-card column select or buttons (drag optional; no new DnD kit). Empty board copy, mutation errors, and pending/disabled controls during a move are required. Cards show company, title, column; url/notes/applied date on edit. Edit and delete (confirm) use U4 actions.
-- KTD6. **Session wraps `POST /api/tailor` before `tailorOnDemand`.** Same route. Set CCC `x-forwarded-for` to a server-derived IP only (`127.0.0.1` local). Never copy the inbound `X-Forwarded-For` header. Still return `{ cv, replyText }` only.
+- KTD6. **Session wraps `POST /api/tailor` before `tailorOnDemand`.** Same route. When the process is on Vercel (`VERCEL=1`) or `CCC_TRUSTED_PROXY=vercel`, set CCC `x-forwarded-for` from the first address in `x-vercel-forwarded-for`. Every other topology, including local dev, sends `127.0.0.1`. Inbound `X-Forwarded-For` is not a client-IP source. Still return `{ cv, replyText }` only.
 - KTD7. **Unit tests stay `tsx --test tests/**/*.test.ts` with injected deps / mocked Prisma / mocked session.** No live LLM. Isolation tests use two user ids. Optional Docker Postgres is for migrate/dev, not `npm test`.
 
 ### Assumptions
@@ -197,7 +197,7 @@ U1 schema + Prisma client + `lib/auth.ts` generate → U2 pages/session/middlewa
 - **Goal:** Anonymous tailor cannot spend the key. Live CCC receives an IP header.
 - **Requirements:** R6, R7.
 - **Files:** `app/api/tailor/route.ts`, `app/api/lib/ccc-tailor.ts`, `app/page.tsx`, `tests/ccc-tailor.test.ts`.
-- **Approach:** Route calls `getSessionUserId`; if null, 401 and return before `tailorOnDemand`. Helper always sets `x-forwarded-for` to `127.0.0.1` (or a configured trusted IP). Test that a spoofed inbound header is not forwarded. Redirect unsigned visitors from `/` to `/login`. Keep `{ cv, replyText }` envelope.
+- **Approach:** Route calls `getSessionUserId`; if null, 401 and return before `tailorOnDemand`. `clientIpForCcc` sets CCC `x-forwarded-for` from `x-vercel-forwarded-for` only when the Vercel topology is trusted (`VERCEL=1` or `CCC_TRUSTED_PROXY=vercel`); otherwise it sends `127.0.0.1`. Test that a spoofed inbound header is not forwarded and that two platform client IPs stay distinct. Redirect unsigned visitors from `/` to `/login`. Keep `{ cv, replyText }` envelope.
 - **Done when:** AE2 passes in unit tests (fetchImpl not called).
 - **Test scenarios:**
   - No session → 401, `fetchImpl` not called.
