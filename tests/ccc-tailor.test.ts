@@ -129,13 +129,14 @@ describe("tailorOnDemand", () => {
       apiUrl: "http://ccc.test",
       apiKey: "secret",
       fetchImpl: async () => {
-        throw new Error("network down");
+        throw new Error("connect ECONNREFUSED 127.0.0.1:9");
       },
     });
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.status, 503);
-      assert.equal(result.error.includes("network"), false);
+      assert.equal(result.error, "Tailor request failed. Please try again.");
+      assert.equal(/ECONNREFUSED/i.test(result.error), false);
     }
   });
 
