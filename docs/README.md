@@ -19,6 +19,7 @@ This directory keeps project knowledge close to the code.
 - `solutions/` — institutional learnings (bugs, best practices, workflow patterns).
 - `brainstorms/` — `/ce-brainstorm` artifacts.
 - `ideation/` — `/ce-ideate` ranked directions.
+- `code-reviews/` — persisted `/ce-code-review` and `/ce-code-review-tiered` reports.
 - `residual-review-findings/` — deferred CE review leftovers.
 - `spec/` — product behavior / UI contracts when they outgrow a plan.
 - `test/` — test strategy notes.
