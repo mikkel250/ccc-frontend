@@ -228,6 +228,9 @@ describe("POST /api/tailor", () => {
     );
     assert.equal(called, false);
     assert.equal(response.status, 401);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(typeof body.error, "string");
+    assert.equal(/secret|key|bearer/i.test(body.error ?? ""), false);
   });
 
   it("forwards TRUSTED_CCC_CLIENT_IP and ignores inbound proxy headers", async () => {
