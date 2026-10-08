@@ -86,7 +86,7 @@ async function readTextCapped(
           chunk = await Promise.race([pending, deadline.promise]);
         } catch (error) {
           void pending.catch(() => undefined);
-          await reader.cancel().catch(() => undefined);
+          void reader.cancel().catch(() => undefined);
           return { ok: false, tooLarge: false, timedOut: isBodyTimeout(error) };
         }
         const { done, value } = chunk;
@@ -98,13 +98,13 @@ async function readTextCapped(
         }
         total += value.byteLength;
         if (total > maxBytes) {
-          await reader.cancel().catch(() => undefined);
+          void reader.cancel().catch(() => undefined);
           return { ok: false, tooLarge: true };
         }
         chunks.push(value);
       }
     } catch {
-      await reader.cancel().catch(() => undefined);
+      void reader.cancel().catch(() => undefined);
       return { ok: false, tooLarge: false, timedOut: false };
     }
 

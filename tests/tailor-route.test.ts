@@ -8,6 +8,7 @@ import {
   BODY_READ_TIMEOUT,
   BODY_READ_TIMEOUT_MS,
   BODY_TOO_LARGE,
+  GENERIC_ERROR,
   INVALID_JSON,
   MAX_CCC_FETCH_TIMEOUT_MS,
   TAILOR_MAX_DURATION_SEC,
@@ -61,6 +62,64 @@ describe("readTailorJobDescription", () => {
     }
   });
 
+  it("returns 408 when cancel stays pending after a stalled body", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"jobDescription":"ab'));
+      },
+      cancel() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const request = new Request("http://127.0.0.1/api/tailor", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: stream,
+      duplex: "half",
+    });
+    const result = await Promise.race([
+      readTailorJobDescription(request, 1024, 30),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("body read stayed open")), 400);
+      }),
+    ]);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 408);
+      assert.equal(result.error, BODY_READ_TIMEOUT);
+    }
+  });
+
+  it("returns 413 when cancel stays pending after an oversized chunk", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode("x".repeat(64)));
+      },
+      cancel() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const request = new Request("http://127.0.0.1/api/tailor", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: stream,
+      duplex: "half",
+    });
+    const result = await Promise.race([
+      readTailorJobDescription(request, 16, 5_000),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("body read stayed open")), 400);
+      }),
+    ]);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 413);
+      assert.equal(result.error, BODY_TOO_LARGE);
+    }
+  });
+
   it("returns 408 when the body stalls after a partial chunk", async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -102,10 +161,11 @@ describe("readTailorJobDescription", () => {
 });
 
 describe("POST /api/tailor", () => {
-  it("keeps maxDuration above the clamped CCC fetch timeout", () => {
+  it("keeps body read plus CCC fetch inside maxDuration with headroom", () => {
     assert.equal(maxDuration, TAILOR_MAX_DURATION_SEC);
-    assert.ok(MAX_CCC_FETCH_TIMEOUT_MS < maxDuration * 1000);
-    assert.ok(BODY_READ_TIMEOUT_MS < maxDuration * 1000);
+    const routeMs = maxDuration * 1000;
+    const headroomMs = 5_000;
+    assert.ok(BODY_READ_TIMEOUT_MS + MAX_CCC_FETCH_TIMEOUT_MS <= routeMs - headroomMs);
   });
 
   it("rejects a body over BODY_MAX_BYTES with 413 and does not call CCC", async () => {
@@ -261,6 +321,85 @@ describe("POST /api/tailor", () => {
       assert.equal(response.status, 200);
       assert.equal(forwarded, TRUSTED_CCC_CLIENT_IP);
       assert.equal(forwarded, "127.0.0.1");
+    } finally {
+      globalThis.fetch = originalFetch;
+      restore();
+    }
+  });
+
+  it("propagates CCC 422 and 500 with a sanitized body", async () => {
+    const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY"]);
+    process.env.CCC_API_URL = "http://ccc.test";
+    process.env.TAILOR_API_KEY = "secret-key-value";
+    const originalFetch = globalThis.fetch;
+    const cases = [
+      { status: 422, error: "Validation failed", expected: "Validation failed" },
+      { status: 500, error: "Invalid Bearer TAILOR_API_KEY", expected: GENERIC_ERROR },
+    ];
+    try {
+      for (const upstream of cases) {
+        globalThis.fetch = (async () =>
+          Response.json({ error: upstream.error }, { status: upstream.status })) as typeof fetch;
+        const response = await handleTailorPost(
+          new Request("http://127.0.0.1/api/tailor", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+          }),
+          signedIn
+        );
+        assert.equal(response.status, upstream.status);
+        const body = (await response.json()) as { error?: string };
+        assert.equal(body.error, upstream.expected);
+        assert.equal(/bearer|api[_-]?key|tailor_api/i.test(body.error ?? ""), false);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      restore();
+    }
+  });
+
+  it("maps fetch failure, timeout, and a cv-less success through the route", async () => {
+    const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY"]);
+    process.env.CCC_API_URL = "http://ccc.test";
+    process.env.TAILOR_API_KEY = "secret-key-value";
+    const originalFetch = globalThis.fetch;
+    const cases: Array<{ status: number; fetchImpl: typeof fetch }> = [
+      {
+        status: 503,
+        fetchImpl: (async () => {
+          throw new Error("connect ECONNREFUSED");
+        }) as typeof fetch,
+      },
+      {
+        status: 504,
+        fetchImpl: (async () => {
+          const error = new Error("The operation was aborted due to timeout");
+          error.name = "TimeoutError";
+          throw error;
+        }) as typeof fetch,
+      },
+      {
+        status: 502,
+        fetchImpl: (async () => Response.json({ replyText: "Thanks." })) as typeof fetch,
+      },
+    ];
+    try {
+      for (const upstream of cases) {
+        globalThis.fetch = upstream.fetchImpl;
+        const response = await handleTailorPost(
+          new Request("http://127.0.0.1/api/tailor", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+          }),
+          signedIn
+        );
+        assert.equal(response.status, upstream.status);
+        const body = (await response.json()) as { error?: string; cv?: string };
+        assert.equal(body.error, GENERIC_ERROR);
+        assert.equal(body.cv, undefined);
+      }
     } finally {
       globalThis.fetch = originalFetch;
       restore();

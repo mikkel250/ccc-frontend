@@ -71,11 +71,11 @@ describe("resolveCccFetchTimeoutMs", () => {
   });
 
   it("rounds fractional timeouts to integers AbortSignal.timeout accepts", () => {
-    assert.equal(resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "120000.5" }), 120_001);
+    assert.equal(resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "90000.5" }), 90_001);
     assert.equal(resolveCccFetchTimeoutMs({ timeoutMs: 40.5 }, {}), 41);
     assert.equal(resolveCccFetchTimeoutMs({ timeoutMs: 0.4 }, {}), DEFAULT_CCC_FETCH_TIMEOUT_MS);
     assert.equal(
-      Number.isInteger(resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "120000.5" })),
+      Number.isInteger(resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "90000.5" })),
       true
     );
   });
