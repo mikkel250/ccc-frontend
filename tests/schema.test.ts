@@ -13,9 +13,12 @@ describe("Job Prisma schema", () => {
     assert.match(jobModel, /^\s*userId\s+String$/m);
     assert.doesNotMatch(jobModel, /^\s*userId\s+String\?/m);
     assert.match(jobModel, /appliedAt\s+DateTime\s+@default\(now\(\)\)/);
-    for (const status of JOB_STATUSES) {
-      assert.match(schema, new RegExp(`\\b${status}\\b`));
-    }
+    assert.match(jobModel, /^\s*status\s+JobStatus\s*$/m);
+    const statusEnum = schema.match(/enum JobStatus \{([\s\S]*?)\}/)?.[1] ?? "";
+    const members = [...statusEnum.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/gm)].map(
+      (match) => match[1]
+    );
+    assert.deepEqual(members, [...JOB_STATUSES]);
     assert.match(jobModel, /@@unique\(\[userId, status, position\]\)/);
   });
 

@@ -130,6 +130,61 @@ function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecor
   return store;
 }
 
+function positionConflict(): Error {
+  return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+}
+
+function allowOverlappingPositionConflicts(db: ReturnType<typeof createMemoryStore>): void {
+  const aggregate = db.job.aggregate.bind(db.job);
+  const create = db.job.create.bind(db.job);
+  const updateMany = db.job.updateMany.bind(db.job);
+  let readers = 0;
+  let releaseBoth: () => void = () => {};
+  const bothRead = new Promise<void>((resolve) => {
+    releaseBoth = resolve;
+  });
+  db.$transaction = async (run) => run({ job: db.job });
+  db.job.aggregate = async (args) => {
+    const snapshot = await aggregate(args);
+    readers += 1;
+    if (readers === 2) {
+      releaseBoth();
+    } else if (readers < 2) {
+      await bothRead;
+    }
+    return snapshot;
+  };
+  db.job.create = async (args) => {
+    const taken = db.rows.some(
+      (row) =>
+        row.userId === args.data.userId &&
+        row.status === args.data.status &&
+        row.position === args.data.position
+    );
+    if (taken) {
+      throw positionConflict();
+    }
+    return create(args);
+  };
+  db.job.updateMany = async (args) => {
+    const status = args.data.status;
+    const position = args.data.position;
+    if (status !== undefined && position !== undefined) {
+      const taken = db.rows.some(
+        (row) =>
+          row.id !== args.where.id &&
+          row.userId === args.where.userId &&
+          row.status === status &&
+          row.position === position
+      );
+      if (taken) {
+        throw positionConflict();
+      }
+    }
+    return updateMany(args);
+  };
+}
+
 const now = new Date("2026-09-01T12:00:00.000Z");
 
 function seedJob(overrides: Partial<JobRecord> & Pick<JobRecord, "id" | "userId">): JobRecord {
@@ -285,6 +340,39 @@ describe("jobs isolation", () => {
     assert.equal(db.rows.length, 0);
   });
 
+  it("clears notes and replaces appliedAt only when a date is sent", async () => {
+    const db = createMemoryStore([
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        notes: "Follow up Friday",
+        appliedAt: new Date("2026-04-01T00:00:00.000Z"),
+      }),
+    ]);
+    const cleared = await updateJob(
+      "user-a",
+      "a1",
+      { notes: "", appliedAt: "" },
+      { db }
+    );
+    assert.equal(cleared.ok, true);
+    if (cleared.ok) {
+      assert.equal(cleared.job.notes, null);
+      assert.equal(cleared.job.appliedAt.toISOString(), "2026-04-01T00:00:00.000Z");
+    }
+
+    const replaced = await updateJob(
+      "user-a",
+      "a1",
+      { appliedAt: "2026-05-02" },
+      { db }
+    );
+    assert.equal(replaced.ok, true);
+    if (replaced.ok) {
+      assert.equal(replaced.job.appliedAt.toISOString(), "2026-05-02T00:00:00.000Z");
+    }
+  });
+
   it("stores an empty URL as null on create and update", async () => {
     const db = createMemoryStore();
     const created = await createJob(
@@ -339,6 +427,30 @@ describe("jobs isolation", () => {
     }
   });
 
+  it("allocates a column position from the row seen inside the update transaction", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+      seedJob({ id: "i1", userId: "user-a", status: "interview", position: 0 }),
+    ]);
+    const runTransaction = db.$transaction.bind(db);
+    db.$transaction = async (run) => {
+      const row = db.rows.find((job) => job.id === "a1");
+      if (row?.status === "applied") {
+        row.status = "interview";
+        row.position = 1;
+      }
+      return runTransaction(run);
+    };
+
+    const result = await updateJob("user-a", "a1", { status: "interview" }, { db });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.job.status, "interview");
+      assert.equal(result.job.position, 1);
+    }
+  });
+
   it("moves a card to a new column at the next position", async () => {
     const db = createMemoryStore([
       seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
@@ -363,6 +475,56 @@ describe("jobs isolation", () => {
     const results = await Promise.all([
       updateJob("user-a", "a1", { status: "interview" }, { db }),
       updateJob("user-a", "a2", { status: "interview" }, { db }),
+    ]);
+
+    assert.equal(results.every((result) => result.ok), true);
+    assert.deepEqual(
+      db.rows
+        .filter((job) => job.userId === "user-a" && job.status === "interview")
+        .sort((left, right) => left.position - right.position)
+        .map((job) => job.position),
+      [0, 1, 2]
+    );
+  });
+
+  it("retries overlapping creates when the store reports a position conflict", async () => {
+    const db = createMemoryStore();
+    allowOverlappingPositionConflicts(db);
+    const results = await Promise.race([
+      Promise.all([
+        createJob("user-a", { company: "Alpha", title: "Engineer" }, { db }),
+        createJob("user-a", { company: "Beta", title: "Designer" }, { db }),
+      ]),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("overlapping creates did not finish")), 1000);
+      }),
+    ]);
+
+    assert.equal(results.every((result) => result.ok), true);
+    assert.deepEqual(
+      db.rows
+        .filter((job) => job.userId === "user-a" && job.status === "applied")
+        .sort((left, right) => left.position - right.position)
+        .map((job) => job.position),
+      [0, 1]
+    );
+  });
+
+  it("retries overlapping column moves when the store reports a position conflict", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+      seedJob({ id: "a2", userId: "user-a", status: "applied", position: 1 }),
+      seedJob({ id: "i1", userId: "user-a", status: "interview", position: 0 }),
+    ]);
+    allowOverlappingPositionConflicts(db);
+    const results = await Promise.race([
+      Promise.all([
+        updateJob("user-a", "a1", { status: "interview" }, { db }),
+        updateJob("user-a", "a2", { status: "interview" }, { db }),
+      ]),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("overlapping moves did not finish")), 1000);
+      }),
     ]);
 
     assert.equal(results.every((result) => result.ok), true);
