@@ -18,4 +18,4 @@ Before writing a single line of code in a forked repo:
 The heuristic: "Fork → audit remotes → orphan main → first commit" is cheaper than retroactively squashing history after local work lands.
 
 ## See Also
-- [Original source](docs/archive/engineering-learnings.md)
+- [Original source](../archive/engineering-learnings.md)
