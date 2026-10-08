@@ -128,7 +128,10 @@ export async function tailorOnDemand(
   let body: unknown = null;
   try {
     body = await response.json();
-  } catch {
+  } catch (error) {
+    if (isTimeoutOrAbortError(error)) {
+      return { ok: false, status: 504, error: GENERIC_ERROR };
+    }
     body = null;
   }
 

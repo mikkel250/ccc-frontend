@@ -16,6 +16,22 @@ import {
   TRUSTED_CCC_CLIENT_IP,
 } from "../app/lib/tailor-constants";
 
+function abortedJsonResponse(status: number, name: "AbortError" | "TimeoutError"): Response {
+  const stream = new ReadableStream({
+    start(controller) {
+      const message =
+        name === "TimeoutError"
+          ? "The operation was aborted due to timeout"
+          : "The operation was aborted";
+      controller.error(new DOMException(message, name));
+    },
+  });
+  return new Response(stream, {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 function abortingFetch(): typeof fetch {
   return ((_input, init) =>
     new Promise((_, reject) => {
@@ -54,6 +70,16 @@ describe("resolveCccFetchTimeoutMs", () => {
     assert.equal(resolveCccFetchTimeoutMs({ timeoutMs: 999_999 }, {}), MAX_CCC_FETCH_TIMEOUT_MS);
     assert.equal(resolveCccFetchTimeoutMs({}, {}), DEFAULT_CCC_FETCH_TIMEOUT_MS);
     assert.ok(DEFAULT_CCC_FETCH_TIMEOUT_MS <= MAX_CCC_FETCH_TIMEOUT_MS);
+  });
+
+  it("rounds fractional timeouts to integers AbortSignal.timeout accepts", () => {
+    assert.equal(resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "120000.5" }), 120_001);
+    assert.equal(resolveCccFetchTimeoutMs({ timeoutMs: 40.5 }, {}), 41);
+    assert.equal(resolveCccFetchTimeoutMs({ timeoutMs: 0.4 }, {}), DEFAULT_CCC_FETCH_TIMEOUT_MS);
+    assert.equal(
+      Number.isInteger(resolveCccFetchTimeoutMs({}, { CCC_FETCH_TIMEOUT_MS: "120000.5" })),
+      true
+    );
   });
 });
 
@@ -338,6 +364,64 @@ describe("tailorOnDemand", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.status, 504);
+      assert.equal(result.error, GENERIC_ERROR);
+    }
+  });
+
+  it("fetches when the timeout is a positive fraction", async () => {
+    let called = false;
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      timeoutMs: 40.5,
+      fetchImpl: async () => {
+        called = true;
+        return Response.json({ cv: "UEsDbA==", replyText: null });
+      },
+    });
+    assert.equal(called, true);
+    assert.equal(result.ok, true);
+  });
+
+  it("maps a stalled 200 JSON body to 504", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      fetchImpl: async () => abortedJsonResponse(200, "TimeoutError"),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 504);
+      assert.equal(result.error, GENERIC_ERROR);
+    }
+  });
+
+  it("maps a stalled error JSON body to 504", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      fetchImpl: async () => abortedJsonResponse(422, "AbortError"),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 504);
+      assert.equal(result.error, GENERIC_ERROR);
+    }
+  });
+
+  it("maps malformed 200 JSON to 502", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      fetchImpl: async () =>
+        new Response("not-json", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 502);
       assert.equal(result.error, GENERIC_ERROR);
     }
   });

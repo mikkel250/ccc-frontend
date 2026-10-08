@@ -13,6 +13,13 @@ function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
 }
 
+export function tailorFailureMessage(status: number, serverError: string | undefined): string {
+  if (status === 504) {
+    return TIMEOUT_ERROR;
+  }
+  return serverError?.trim() || GENERIC_ERROR;
+}
+
 async function readTailorResponse(response: Response): Promise<TailorResponse> {
   try {
     const parsed: unknown = await response.json();
@@ -82,8 +89,7 @@ export function TailorForm() {
         return;
       }
       if (!response.ok) {
-        const fallback = response.status === 504 ? TIMEOUT_ERROR : GENERIC_ERROR;
-        setError(body.error?.trim() || fallback);
+        setError(tailorFailureMessage(response.status, body.error));
         return;
       }
       if (!body.cv) {

@@ -5,8 +5,9 @@ import { handleTailorPost } from "../app/api/lib/tailor-post";
 import { readTailorJobDescription } from "../app/api/lib/read-json-body";
 import {
   BODY_MAX_BYTES,
+  BODY_READ_TIMEOUT,
+  BODY_READ_TIMEOUT_MS,
   BODY_TOO_LARGE,
-  GENERIC_ERROR,
   INVALID_JSON,
   MAX_CCC_FETCH_TIMEOUT_MS,
   TAILOR_MAX_DURATION_SEC,
@@ -47,6 +48,45 @@ describe("readTailorJobDescription", () => {
     }
   });
 
+  it("reads a complete body inside the deadline", async () => {
+    const request = new Request("http://127.0.0.1/api/tailor", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobDescription: "hello" }),
+    });
+    const result = await readTailorJobDescription(request, 1024, 30);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.jobDescription, "hello");
+    }
+  });
+
+  it("returns 408 when the body stalls after a partial chunk", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"jobDescription":"ab'));
+      },
+    });
+    const request = new Request("http://127.0.0.1/api/tailor", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: stream,
+      duplex: "half",
+    });
+    const result = await Promise.race([
+      readTailorJobDescription(request, 1024, 30),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("body read stayed open")), 400);
+      }),
+    ]);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 408);
+      assert.equal(result.error, BODY_READ_TIMEOUT);
+    }
+  });
+
   it("rejects a body over the cap with 413", async () => {
     const request = new Request("http://127.0.0.1/api/tailor", {
       method: "POST",
@@ -65,6 +105,7 @@ describe("POST /api/tailor", () => {
   it("keeps maxDuration above the clamped CCC fetch timeout", () => {
     assert.equal(maxDuration, TAILOR_MAX_DURATION_SEC);
     assert.ok(MAX_CCC_FETCH_TIMEOUT_MS < maxDuration * 1000);
+    assert.ok(BODY_READ_TIMEOUT_MS < maxDuration * 1000);
   });
 
   it("rejects a body over BODY_MAX_BYTES with 413 and does not call CCC", async () => {

@@ -2,6 +2,7 @@ export const GENERIC_ERROR = "Tailor request failed. Please try again.";
 export const MISSING_ENV = "Tailor service is not configured.";
 export const TIMEOUT_ERROR = "Tailor request timed out. Please try again.";
 export const BODY_TOO_LARGE = "Request body too large.";
+export const BODY_READ_TIMEOUT = "Request body timed out.";
 export const INVALID_JSON = "Invalid JSON.";
 
 /** CCC LLM calls routinely exceed 30s; keep this above typical tailor latency. */
@@ -31,11 +32,18 @@ export function cccFetchTimeoutMs(raw: number | undefined): number {
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
     return fallback;
   }
-  return Math.min(raw, MAX_CCC_FETCH_TIMEOUT_MS);
+  const rounded = Math.round(raw);
+  if (rounded <= 0) {
+    return fallback;
+  }
+  return Math.min(rounded, MAX_CCC_FETCH_TIMEOUT_MS);
 }
 
 /** UTF-8 worst case for JD_MAX_CHARS plus JSON envelope. */
 export const BODY_MAX_BYTES = 256 * 1024;
+
+/** Whole-body deadline so a stalled client cannot hold the handler until maxDuration. */
+export const BODY_READ_TIMEOUT_MS = 30_000;
 
 /** CCC tailor-cv rejects requests with no parseable client IP. */
 export const TRUSTED_CCC_CLIENT_IP = "127.0.0.1";
