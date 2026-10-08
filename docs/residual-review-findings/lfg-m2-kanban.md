@@ -2,7 +2,7 @@
 
 **Branch:** `lfg/m2-kanban`  
 **HEAD at filing:** `5228796`  
-**Review run:** `/tmp/compound-engineering-501/ce-code-review/20260906-135442-d5aebc65`  
+**Review run:** `/tmp/compound-engineering-501/ce-code-review/20260906-135442-d5aebc65` (ephemeral; only residual items below were persisted)  
 **Plan:** `docs/plans/2026-09-06-002-feat-kanban-job-tracker-plan.md`
 
 Applied in `fix(review): apply review findings`: adapter transactions, Prisma/board error paths, `updateMany` not-found, auth form/sign-out failure UI, CCC 401/403 remapped to 502, date-only `appliedAt`, and the missing registration/jobs/tailor tests.
