@@ -4,6 +4,7 @@ import {
   createJob,
   deleteJob,
   listJobs,
+  toBoardJob,
   updateJob,
   type JobRecord,
   type JobsStore,
@@ -373,6 +374,46 @@ describe("jobs isolation", () => {
         .map((job) => job.position),
       [0, 1, 2]
     );
+  });
+
+  it("rejects notes longer than 4000 characters", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", notes: "n".repeat(4001) },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects an invalid applied date on create", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", appliedAt: "not-a-date" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the applied date.");
+    }
+  });
+
+  it("formats board jobs with a calendar appliedAt string", () => {
+    const board = toBoardJob(
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        appliedAt: new Date("2026-03-15T15:30:00.000Z"),
+      })
+    );
+    assert.equal(board.appliedAt, "2026-03-15");
+    assert.equal(board.company, "Acme");
   });
 
   it("retries a column move when its target position conflicts", async () => {
