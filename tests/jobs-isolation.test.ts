@@ -4,6 +4,7 @@ import {
   createJob,
   deleteJob,
   listJobs,
+  toBoardJob,
   updateJob,
   type JobRecord,
   type JobsStore,
@@ -146,6 +147,20 @@ function seedJob(overrides: Partial<JobRecord> & Pick<JobRecord, "id" | "userId"
     ...overrides,
   };
 }
+
+describe("toBoardJob", () => {
+  it("formats appliedAt as a UTC calendar date for the Kanban board", () => {
+    const board = toBoardJob(
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        appliedAt: new Date("2026-03-15T18:30:00.000Z"),
+      })
+    );
+    assert.equal(board.appliedAt, "2026-03-15");
+    assert.equal(board.company, "Acme");
+  });
+});
 
 describe("jobs isolation", () => {
   it("list(userA) does not include userB jobs", async () => {
