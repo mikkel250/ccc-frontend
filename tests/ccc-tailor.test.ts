@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { tailorOnDemand } from "../app/api/lib/ccc-tailor";
+import { JD_MAX_CHARS, tailorOnDemand } from "../app/api/lib/ccc-tailor";
 import { handleTailorPost } from "../app/api/lib/tailor-post";
 
 describe("tailorOnDemand", () => {
@@ -92,6 +92,63 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("rejects an oversized JD without fetching", async () => {
+    let called = false;
+    const result = await tailorOnDemand("x".repeat(JD_MAX_CHARS + 1), {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      fetchImpl: async () => {
+        called = true;
+        return new Response("{}");
+      },
+    });
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 400);
+      assert.match(result.error, /50000/);
+    }
+  });
+
+  it("returns 503 when CCC is unreachable", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      fetchImpl: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 503);
+      assert.equal(result.error.includes("ECONNREFUSED"), false);
+    }
+  });
+
+  it("returns 502 when CCC 200 omits a usable cv", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      fetchImpl: async () => Response.json({ replyText: "Hi" }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 502);
+    }
+  });
+
+  it("strips a trailing slash from CCC_API_URL", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test/",
+      apiKey: "secret",
+      fetchImpl: async (input) => {
+        assert.equal(String(input), "http://ccc.test/api/tailor-cv");
+        return Response.json({ cv: "UEsDbA==" });
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+
   it("maps CCC 422 to a client-safe error", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
@@ -176,6 +233,43 @@ describe("handleTailorPost", () => {
     assert.equal(response.status, 400);
     const body = (await response.json()) as { error?: string };
     assert.equal(body.error, "Invalid JSON.");
+  });
+
+  it("maps CCC 403 to 502 so session auth stays distinct from CCC auth", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => ({ ok: false, status: 403, error: "Forbidden" }),
+      }
+    );
+    assert.equal(response.status, 502);
+  });
+
+  it("returns tailor validation errors when jobDescription is not a string", async () => {
+    let seenJd: string | undefined;
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: 12345 }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async (jd) => {
+          seenJd = jd;
+          return { ok: false, status: 400, error: "Job description is required." };
+        },
+      }
+    );
+    assert.equal(seenJd, "");
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Job description is required.");
   });
 
   it("maps CCC 401 to 502 so session 401 stays unique", async () => {
