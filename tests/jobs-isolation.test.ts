@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   createJob,
   deleteJob,
+  isJobStatus,
   listJobs,
+  toBoardJob,
   updateJob,
   type JobRecord,
   type JobsStore,
@@ -147,6 +149,21 @@ function seedJob(overrides: Partial<JobRecord> & Pick<JobRecord, "id" | "userId"
   };
 }
 
+describe("job helpers", () => {
+  it("recognizes only the four board columns", () => {
+    assert.equal(isJobStatus("applied"), true);
+    assert.equal(isJobStatus("interview"), true);
+    assert.equal(isJobStatus("wishlist"), false);
+  });
+
+  it("formats appliedAt as a YYYY-MM-DD string", () => {
+    const boardJob = toBoardJob(
+      seedJob({ id: "a1", userId: "user-a", appliedAt: new Date("2026-03-15T18:30:00.000Z") })
+    );
+    assert.equal(boardJob.appliedAt, "2026-03-15");
+  });
+});
+
 describe("jobs isolation", () => {
   it("list(userA) does not include userB jobs", async () => {
     const db = createMemoryStore([
@@ -190,6 +207,20 @@ describe("jobs isolation", () => {
     const result = await createJob(
       "user-a",
       { company: "Acme", title: "Eng", status: "wishlist" as "applied" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects notes over 4000 characters", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", notes: "n".repeat(4001) },
       { db }
     );
     assert.equal(result.ok, false);
@@ -243,6 +274,22 @@ describe("jobs isolation", () => {
         .map((job) => job.position),
       [0, 1]
     );
+  });
+
+  it("stops after repeated position conflicts", async () => {
+    const db = createMemoryStore();
+    db.job.create = async () => {
+      throw Object.assign(new Error("position conflict"), { code: "P2002" });
+    };
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Engineer" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+    }
   });
 
   it("retries a create when its position conflicts", async () => {
