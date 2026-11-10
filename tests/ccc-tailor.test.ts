@@ -65,6 +65,18 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("strips a trailing slash from CCC_API_URL", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test/",
+      apiKey: "secret",
+      fetchImpl: async (input) => {
+        assert.equal(String(input), "http://ccc.test/api/tailor-cv");
+        return Response.json({ cv: "UEsDbA==" });
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+
   it("maps CCC 401 to a client-safe error", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",

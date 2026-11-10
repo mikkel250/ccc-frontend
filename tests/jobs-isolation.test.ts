@@ -269,6 +269,27 @@ describe("jobs isolation", () => {
     assert.equal(db.rows[0]?.position, 0);
   });
 
+  it("stops after repeated position conflicts", async () => {
+    const db = createMemoryStore();
+    let attempts = 0;
+    db.job.create = async () => {
+      attempts += 1;
+      throw Object.assign(new Error("position conflict"), { code: "P2002" });
+    };
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Engineer" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+    }
+    // lib/jobs.ts POSITION_ALLOCATION_ATTEMPTS
+    assert.equal(attempts, 4);
+    assert.equal(db.rows.length, 0);
+  });
+
   it("requires a user id at the call boundary", async () => {
     const db = createMemoryStore();
     const result = await createJob("", { company: "Acme", title: "Eng" }, { db });

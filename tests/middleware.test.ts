@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
-import { middleware } from "../middleware";
+import { config, middleware } from "../middleware";
 
 function boardRequest(cookie?: string): NextRequest {
   const headers = new Headers();
@@ -24,5 +24,9 @@ describe("middleware", () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("location"), null);
+  });
+
+  it("matches /board and nested board paths", () => {
+    assert.deepEqual(config.matcher, ["/board", "/board/:path*"]);
   });
 });
