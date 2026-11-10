@@ -36,7 +36,9 @@ Dual Upstash sliding-window ceilings (R21):
 | Per shared-secret hash | `RATE_LIMIT_SECRET_MAX` | `floor(RATE_LIMIT_MAX / 2)` (min 1) |
 | Window | `RATE_LIMIT_WINDOW` | `60000` ms |
 
-Success responses return the **more restrictive** `remaining` / `resetTime` of the two buckets. `sessionId` does not key rate limits.
+Success responses return the **more restrictive** `remaining` / `resetTime` of the two buckets. CCC does **not** currently key those buckets on `sessionId`.
+
+**ccc-frontend BFF:** after a valid session, this app limits tailor and job mutations by Better Auth user id (see `.env.example` `RATE_LIMIT_*` / `JOB_RATE_LIMIT_MAX`). `POST /api/tailor` sends CCC `sessionId` equal to that user id next to the existing Bearer key. It does not copy inbound client headers. CCC still ignores `sessionId` for spend until a companion change; the hashed-secret bucket remains the global CCC cap.
 
 ```json
 HTTP 429

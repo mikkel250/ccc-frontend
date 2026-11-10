@@ -32,7 +32,7 @@ npm run dev
 PORT=3001 npm run dev
 ```
 
-Register the first operator at `/register`, then sign in. `/` (tailor) and `POST /api/tailor` require that session. After the first user exists, public registration is closed unless `ALLOW_REGISTRATION=true`.
+Register the first operator at `/register`, then sign in. `/`, `/board`, and `POST /api/tailor` require that session. After a valid session, tailor and job mutations are capped per user id (`RATE_LIMIT_MAX` / `JOB_RATE_LIMIT_MAX`). Sign-in and sign-up keep a coarse shared fallback that ignores client forwarding headers. After the first user exists, public registration is closed unless `ALLOW_REGISTRATION=true`.
 
 `TAILOR_API_KEY`, `DATABASE_URL`, and Better Auth secrets are server-only. Do not prefix them with `NEXT_PUBLIC_`.
 
