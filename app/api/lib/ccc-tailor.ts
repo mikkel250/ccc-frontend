@@ -32,12 +32,12 @@ const SECRET_SUBSTRING_LEN = 8;
 
 export function resolveCccFetchTimeoutMs(
   deps: Pick<TailorDeps, "timeoutMs"> = {},
-  env: NodeJS.ProcessEnv = process.env
+  env?: { CCC_FETCH_TIMEOUT_MS?: string }
 ): number {
   if (typeof deps.timeoutMs === "number" && Number.isFinite(deps.timeoutMs) && deps.timeoutMs > 0) {
     return cccFetchTimeoutMs(deps.timeoutMs);
   }
-  const fromEnv = Number(env.CCC_FETCH_TIMEOUT_MS);
+  const fromEnv = Number((env ?? process.env).CCC_FETCH_TIMEOUT_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) {
     return cccFetchTimeoutMs(fromEnv);
   }

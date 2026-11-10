@@ -31,6 +31,16 @@ function snapshotEnv(keys: string[]): () => void {
 
 const signedIn = { getSessionUserId: async () => "user-a" as string | null };
 
+function streamingJsonRequest(stream: ReadableStream<Uint8Array>): Request {
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: stream,
+    duplex: "half",
+  };
+  return new Request("http://127.0.0.1/api/tailor", init);
+}
+
 describe("readTailorJobDescription", () => {
   it("rejects Content-Length over the cap with 413", async () => {
     const request = new Request("http://127.0.0.1/api/tailor", {
@@ -72,12 +82,7 @@ describe("readTailorJobDescription", () => {
         return new Promise<void>(() => undefined);
       },
     });
-    const request = new Request("http://127.0.0.1/api/tailor", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: stream,
-      duplex: "half",
-    });
+    const request = streamingJsonRequest(stream);
     const result = await Promise.race([
       readTailorJobDescription(request, 1024, 30),
       new Promise<never>((_, reject) => {
@@ -101,12 +106,7 @@ describe("readTailorJobDescription", () => {
         return new Promise<void>(() => undefined);
       },
     });
-    const request = new Request("http://127.0.0.1/api/tailor", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: stream,
-      duplex: "half",
-    });
+    const request = streamingJsonRequest(stream);
     const result = await Promise.race([
       readTailorJobDescription(request, 16, 5_000),
       new Promise<never>((_, reject) => {
@@ -127,12 +127,7 @@ describe("readTailorJobDescription", () => {
         controller.enqueue(encoder.encode('{"jobDescription":"ab'));
       },
     });
-    const request = new Request("http://127.0.0.1/api/tailor", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: stream,
-      duplex: "half",
-    });
+    const request = streamingJsonRequest(stream);
     const result = await Promise.race([
       readTailorJobDescription(request, 1024, 30),
       new Promise<never>((_, reject) => {
