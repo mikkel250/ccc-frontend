@@ -4,6 +4,7 @@ import { readTailorJobDescription } from "./read-json-body";
 import { getSessionUserId } from "@/lib/session";
 import {
   consumeRateLimit,
+  RATE_LIMIT_ERROR,
   tailorRateLimitConfig,
   type RateLimitResult,
 } from "@/lib/rate-limit";
@@ -13,8 +14,6 @@ export type TailorPostDeps = {
   tailor?: (jobDescription: string, deps?: TailorDeps) => Promise<TailorResult>;
   consume?: (key: string) => RateLimitResult;
 };
-
-const TOO_MANY = "Too many requests. Please wait before trying again.";
 
 export async function handleTailorPost(
   request: Request,
@@ -46,7 +45,7 @@ export async function handleTailorPost(
   const limited = consume(`tailor:${userId}`);
   if (!limited.ok) {
     return NextResponse.json(
-      { error: TOO_MANY },
+      { error: RATE_LIMIT_ERROR },
       {
         status: 429,
         headers: { "Retry-After": String(limited.retryAfterSeconds) },

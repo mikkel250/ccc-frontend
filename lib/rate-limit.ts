@@ -1,3 +1,5 @@
+export const RATE_LIMIT_ERROR = "Too many requests. Please wait before trying again.";
+
 export type RateLimitSuccess = { ok: true };
 
 export type RateLimitFailure = {

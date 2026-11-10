@@ -662,8 +662,9 @@ describe("handleTailorPost", () => {
       }
     );
     assert.equal(denied.status, 429);
+    assert.equal(denied.headers.get("Retry-After"), "60");
     const deniedBody = (await denied.json()) as { error?: string };
-    assert.equal(typeof deniedBody.error, "string");
+    assert.equal(deniedBody.error, "Too many requests. Please wait before trying again.");
 
     const otherUser = await handleTailorPost(
       new Request("http://localhost/api/tailor", {
@@ -757,6 +758,7 @@ describe("handleTailorPost", () => {
       }),
       {
         getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
         tailor: async () => ({ ok: false, status: 401, error: "Unauthorized" }),
       }
     );

@@ -28,6 +28,6 @@ describe("middleware", () => {
   });
 
   it("matches /board and nested board paths", () => {
-    assert.deepEqual(config.matcher, ["/board", "/board/:path*"]);
+    assert.deepEqual(config.matcher, ["/", "/board", "/board/:path*"]);
   });
 });

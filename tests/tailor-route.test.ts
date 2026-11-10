@@ -29,7 +29,10 @@ function snapshotEnv(keys: string[]): () => void {
   };
 }
 
-const signedIn = { getSessionUserId: async () => "user-a" as string | null };
+const signedIn = {
+  getSessionUserId: async () => "user-a" as string | null,
+  consume: () => ({ ok: true as const }),
+};
 
 function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -254,7 +257,7 @@ describe("POST /api/tailor", () => {
   });
 
   it("ignores non-string jobDescription values", async () => {
-    let seenJd = "unset";
+    let called = false;
     const response = await handleTailorPost(
       new Request("http://127.0.0.1/api/tailor", {
         method: "POST",
@@ -263,13 +266,13 @@ describe("POST /api/tailor", () => {
       }),
       {
         ...signedIn,
-        tailor: async (jobDescription) => {
-          seenJd = jobDescription;
+        tailor: async () => {
+          called = true;
           return { ok: false, status: 400, error: "Job description is required." };
         },
       }
     );
-    assert.equal(seenJd, "");
+    assert.equal(called, false);
     assert.equal(response.status, 400);
   });
 
