@@ -6,6 +6,7 @@ import {
   resolveCccFetchTimeoutMs,
   tailorOnDemand,
 } from "../app/api/lib/ccc-tailor";
+import { handleTailorPost } from "../app/api/lib/tailor-post";
 import {
   DEFAULT_CCC_FETCH_TIMEOUT_MS,
   GENERIC_ERROR,
@@ -13,6 +14,7 @@ import {
   MISSING_ENV,
   TRUSTED_CCC_CLIENT_IP,
 } from "../app/lib/tailor-constants";
+import { consumeRateLimit, createMemoryStore } from "../lib/rate-limit";
 
 function abortedJsonResponse(status: number, name: "AbortError" | "TimeoutError"): Response {
   const stream = new ReadableStream({
@@ -189,6 +191,7 @@ describe("tailorOnDemand", () => {
         const body = JSON.parse(String(init?.body));
         assert.equal(body.curationMode, "strict");
         assert.equal(body.jobDescription, "Senior engineer JD");
+        assert.equal(body.sessionId, undefined);
         return Response.json({
           cv: "UEsDbA==",
           replyText: "Thanks for reaching out.",
@@ -214,6 +217,22 @@ describe("tailorOnDemand", () => {
         assert.equal(headers.get("x-forwarded-for"), TRUSTED_CCC_CLIENT_IP);
         assert.equal(headers.get("x-forwarded-for"), "127.0.0.1");
         return Response.json({ cv: "UEsDbA==", replyText: "Thanks." });
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+
+  it("sends a server-set sessionId on the CCC body", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      sessionId: "user-a",
+      fetchImpl: async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        assert.equal(headers.get("x-forwarded-for"), TRUSTED_CCC_CLIENT_IP);
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.sessionId, "user-a");
+        return Response.json({ cv: "UEsDbA==", replyText: "Hi" });
       },
     });
     assert.equal(result.ok, true);
@@ -533,5 +552,216 @@ describe("tailorOnDemand", () => {
       assert.equal(result.status, 422);
       assert.equal(result.error, "Curator output was not valid JSON");
     }
+  });
+});
+
+describe("handleTailorPost", () => {
+  it("returns 401 and does not call CCC when there is no session", async () => {
+    let fetched = false;
+    let consumed = 0;
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.9",
+        },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => null,
+        consume: () => {
+          consumed += 1;
+          return { ok: true };
+        },
+        tailor: async () => {
+          fetched = true;
+          return { ok: true, cv: "nope", replyText: null };
+        },
+      }
+    );
+    assert.equal(response.status, 401);
+    assert.equal(fetched, false);
+    assert.equal(consumed, 0);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(typeof body.error, "string");
+    assert.equal(/secret|key|bearer/i.test(body.error ?? ""), false);
+  });
+
+  it("calls tailor when a session is present and does not copy inbound XFF or client sessionId", async () => {
+    let seenSessionId: string | undefined;
+    let seenKeys: string[] = [];
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.9",
+        },
+        body: JSON.stringify({
+          jobDescription: "Senior engineer JD",
+          sessionId: "other-user",
+        }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
+        tailor: async (_jd, deps) => {
+          seenKeys = Object.keys(deps ?? {});
+          seenSessionId = deps?.sessionId;
+          return { ok: true, cv: "UEsDbA==", replyText: "Hi" };
+        },
+      }
+    );
+    assert.equal(response.status, 200);
+    assert.equal(seenKeys.includes("clientIp"), false);
+    assert.equal(seenSessionId, "user-a");
+    const body = (await response.json()) as { cv?: string };
+    assert.equal(body.cv, "UEsDbA==");
+  });
+
+  it("returns 429 for an exhausted user without calling CCC, while another user is allowed", async () => {
+    const store = createMemoryStore();
+    const config = { max: 1, windowMs: 60_000 };
+    const consume = (key: string) => consumeRateLimit(key, config, { store, now: 1_000 });
+    let tailorCalls = 0;
+
+    const exhausted = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume,
+        tailor: async () => {
+          tailorCalls += 1;
+          return { ok: true, cv: "UEsDbA==", replyText: null };
+        },
+      }
+    );
+    assert.equal(exhausted.status, 200);
+
+    const denied = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-forwarded-for": "203.0.113.9",
+        },
+        body: JSON.stringify({ jobDescription: "Another JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume,
+        tailor: async () => {
+          tailorCalls += 1;
+          return { ok: true, cv: "nope", replyText: null };
+        },
+      }
+    );
+    assert.equal(denied.status, 429);
+    const deniedBody = (await denied.json()) as { error?: string };
+    assert.equal(typeof deniedBody.error, "string");
+
+    const otherUser = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "B user JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-b",
+        consume,
+        tailor: async () => {
+          tailorCalls += 1;
+          return { ok: true, cv: "UEsDbA==", replyText: null };
+        },
+      }
+    );
+    assert.equal(otherUser.status, 200);
+    assert.equal(tailorCalls, 2);
+  });
+
+  it("returns 400 for invalid JSON without consuming", async () => {
+    let consumed = 0;
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not-json",
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => {
+          consumed += 1;
+          return { ok: true };
+        },
+        tailor: async () => {
+          throw new Error("should not tailor");
+        },
+      }
+    );
+    assert.equal(response.status, 400);
+    assert.equal(consumed, 0);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Invalid JSON.");
+  });
+
+  it("returns 400 for empty or oversize JD without consuming", async () => {
+    let consumed = 0;
+    const consume = () => {
+      consumed += 1;
+      return { ok: true as const };
+    };
+    const empty = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "  " }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume,
+        tailor: async () => {
+          throw new Error("should not tailor");
+        },
+      }
+    );
+    assert.equal(empty.status, 400);
+    const oversize = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "x".repeat(JD_MAX_CHARS + 1) }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume,
+        tailor: async () => {
+          throw new Error("should not tailor");
+        },
+      }
+    );
+    assert.equal(oversize.status, 400);
+    assert.equal(consumed, 0);
+  });
+
+  it("maps CCC 401 to 502 so session 401 stays unique", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        tailor: async () => ({ ok: false, status: 401, error: "Unauthorized" }),
+      }
+    );
+    assert.equal(response.status, 502);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Unauthorized");
   });
 });

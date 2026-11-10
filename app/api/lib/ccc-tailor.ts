@@ -26,6 +26,7 @@ export type TailorDeps = {
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
   timeoutMs?: number | undefined;
+  sessionId?: string | undefined;
 };
 
 const SAFE_CCC_ERRORS = new Set([
@@ -125,6 +126,7 @@ export async function tailorOnDemand(
       body: JSON.stringify({
         jobDescription: jd,
         curationMode: "strict",
+        ...(deps.sessionId?.trim() ? { sessionId: deps.sessionId.trim() } : {}),
       }),
       signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps)),
     });
