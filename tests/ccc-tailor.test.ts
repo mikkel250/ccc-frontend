@@ -38,7 +38,11 @@ function abortingFetch(): typeof fetch {
         reject(new Error("missing abort signal"));
         return;
       }
+      // AbortSignal.timeout uses an unref'd timer, so a fetch that only waits
+      // on abort would let the test runner think the event loop is empty.
+      const keepAlive = setInterval(() => undefined, 20);
       const abort = () => {
+        clearInterval(keepAlive);
         if (signal.reason !== undefined) {
           reject(signal.reason);
           return;
