@@ -13,6 +13,78 @@ function signUpAdapter(input: object): SignUpAdapter {
   return (input as { context: { adapter: SignUpAdapter } }).context.adapter;
 }
 
+type ClaimSlot = {
+  state: "pending" | "committed";
+  settled: Promise<void>;
+  finish: () => void;
+};
+
+// Stands in for the registration_claim primary key. The memory adapter does
+// not reject a duplicate id; Postgres does, and waits while the other
+// transaction still holds the row.
+function databaseWithUniqueClaim(database: MemoryDB) {
+  const createAdapter = memoryAdapter(database);
+  const slots = new Map<number, ClaimSlot>();
+
+  const reserve = (id: number): Promise<{ commit: () => void; abort: () => void }> => {
+    const existing = slots.get(id);
+    if (!existing) {
+      let finish: () => void = () => undefined;
+      const settled = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const slot: ClaimSlot = { state: "pending", settled, finish };
+      slots.set(id, slot);
+      return Promise.resolve({
+        commit() {
+          slot.state = "committed";
+          finish();
+        },
+        abort() {
+          if (slots.get(id) === slot && slot.state === "pending") {
+            slots.delete(id);
+          }
+          finish();
+        },
+      });
+    }
+    if (existing.state === "committed") {
+      return Promise.reject(new Error("unique constraint"));
+    }
+    return existing.settled.then(() => reserve(id));
+  };
+
+  return (options: Parameters<typeof createAdapter>[0]) => {
+    const adapter = createAdapter(options);
+    const transaction = adapter.transaction.bind(adapter);
+    adapter.transaction = (async (callback) => {
+      let held: { commit: () => void; abort: () => void } | undefined;
+      try {
+        const result = await transaction(async (trx) => {
+          const create = trx.create.bind(trx);
+          const claimAware = trx as {
+            create: (input: { model: string; data?: { id?: unknown } }) => Promise<unknown>;
+          };
+          claimAware.create = async (input) => {
+            const id = input.data?.id;
+            if (input.model === "registrationClaim" && typeof id === "number") {
+              held = await reserve(id);
+            }
+            return create(input as Parameters<typeof create>[0]);
+          };
+          return callback(trx);
+        });
+        held?.commit();
+        return result;
+      } catch (error) {
+        held?.abort();
+        throw error;
+      }
+    }) as typeof adapter.transaction;
+    return adapter;
+  };
+}
+
 describe("first-operator registration", () => {
   it("rolls back a claim after failed signup so a retry can succeed", async () => {
     const database: MemoryDB = {
@@ -77,7 +149,7 @@ describe("first-operator registration", () => {
     const auth = betterAuth({
       secret: "test-secret-at-least-32-characters-long",
       baseURL: "http://localhost:3000",
-      database: memoryAdapter(database),
+      database: databaseWithUniqueClaim(database),
       emailAndPassword: { enabled: true, minPasswordLength: 8 },
       plugins: [firstOperatorRegistration({ allowRegistration: "false" })],
     });
@@ -103,7 +175,7 @@ describe("first-operator registration", () => {
     assert.equal(database.session.length, 1);
   });
 
-  it("releases the signup queue when validation fails before the transaction", async () => {
+  it("accepts a signup after validation fails", async () => {
     const database = {
       user: [],
       session: [],
@@ -148,7 +220,7 @@ describe("first-operator registration", () => {
     assert.equal(database.registrationClaim.length, 1);
   });
 
-  it("releases the signup queue when the schema check fails before the transaction", async () => {
+  it("accepts a signup after a schema check fails", async () => {
     const database: MemoryDB = {
       user: [],
       session: [],
@@ -220,7 +292,7 @@ describe("first-operator registration", () => {
     assert.equal(database.user.length, 1);
   });
 
-  it("keeps the signup queue closed while an unrelated transaction runs", async () => {
+  it("lets one signup finish while an unrelated transaction runs", async () => {
     const database: MemoryDB = {
       user: [],
       session: [],
@@ -233,7 +305,7 @@ describe("first-operator registration", () => {
     const auth = betterAuth({
       secret: "test-secret-at-least-32-characters-long",
       baseURL: "http://localhost:3000",
-      database: memoryAdapter(database),
+      database: databaseWithUniqueClaim(database),
       emailAndPassword: { enabled: true, minPasswordLength: 8 },
       databaseHooks: {
         account: {

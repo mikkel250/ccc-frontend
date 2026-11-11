@@ -24,6 +24,7 @@ describe("middleware", () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("location"), null);
+    assert.equal(response.headers.get("x-middleware-next"), "1");
   });
 
   it("matches /board and nested board paths", () => {

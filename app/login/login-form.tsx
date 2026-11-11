@@ -4,7 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
-export function LoginForm() {
+type SignInResult = { error: { message?: string } | null };
+
+type LoginFormProps = {
+  signIn?: (input: { email: string; password: string }) => Promise<SignInResult>;
+};
+
+export function LoginForm({ signIn = (input) => authClient.signIn.email(input) }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -16,7 +22,7 @@ export function LoginForm() {
     setPending(true);
     setError(null);
     try {
-      const { error: signInError } = await authClient.signIn.email({
+      const { error: signInError } = await signIn({
         email,
         password,
       });

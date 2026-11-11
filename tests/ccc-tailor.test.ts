@@ -335,6 +335,51 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("maps non-error and non-abort failures to a generic status", async () => {
+    const failures = [
+      null,
+      "raw-failure",
+      { message: "raw-failure" },
+      { name: "TypeError", message: "raw-failure" },
+    ];
+    for (const failure of failures) {
+      const fetched = await tailorOnDemand("Senior engineer JD", {
+        apiUrl: "http://ccc.test",
+        apiKey: "secret-key-value",
+        fetchImpl: async () => {
+          throw failure;
+        },
+      });
+      assert.equal(fetched.ok, false);
+      if (!fetched.ok) {
+        assert.equal(fetched.status, 503);
+        assert.equal(fetched.error, GENERIC_ERROR);
+        assert.equal(fetched.error.includes("raw-failure"), false);
+      }
+
+      const parsed = await tailorOnDemand("Senior engineer JD", {
+        apiUrl: "http://ccc.test",
+        apiKey: "secret-key-value",
+        fetchImpl: async () => {
+          const response = new Response("not-json", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+          response.json = async () => {
+            throw failure;
+          };
+          return response;
+        },
+      });
+      assert.equal(parsed.ok, false);
+      if (!parsed.ok) {
+        assert.equal(parsed.status, 502);
+        assert.equal(parsed.error, GENERIC_ERROR);
+        assert.equal(parsed.error.includes("raw-failure"), false);
+      }
+    }
+  });
+
   it("maps fetch rejection to 503", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",

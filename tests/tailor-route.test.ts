@@ -294,6 +294,31 @@ describe("POST /api/tailor", () => {
     }
   });
 
+  it("returns 401 before a stalled body can block the handler", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    let called = false;
+    const response = await Promise.race([
+      handleTailorPost(streamingJsonRequest(stream), {
+        getSessionUserId: async () => null,
+        tailor: async () => {
+          called = true;
+          return { ok: true, cv: "UEsDbA==", replyText: null };
+        },
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("401 waited on the body")), 200);
+      }),
+    ]);
+    assert.equal(response.status, 401);
+    assert.equal(called, false);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Sign in required.");
+  });
+
   it("returns 401 without a session and does not call CCC", async () => {
     let called = false;
     const response = await handleTailorPost(

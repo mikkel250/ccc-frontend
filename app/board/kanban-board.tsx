@@ -26,7 +26,24 @@ function localDateInputValue(value = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
-export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
+type BoardActions = {
+  createJob?: (formData: FormData) => Promise<{ error?: string } | undefined>;
+  updateJob?: (formData: FormData) => Promise<{ error?: string } | undefined>;
+  deleteJob?: (jobId: string) => Promise<{ error?: string } | undefined>;
+  moveJob?: (jobId: string, status: JobStatus) => Promise<{ error?: string } | undefined>;
+};
+
+export function KanbanBoard({
+  jobs,
+  actions,
+}: {
+  jobs: BoardJob[];
+  actions?: BoardActions;
+}) {
+  const createJob = actions?.createJob ?? createJobAction;
+  const updateJob = actions?.updateJob ?? updateJobAction;
+  const deleteJob = actions?.deleteJob ?? deleteJobAction;
+  const moveJob = actions?.moveJob ?? moveJobAction;
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -52,7 +69,7 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
       <form
         className="grid gap-3 rounded-md border border-neutral-200 p-4 dark:border-neutral-800 md:grid-cols-2"
         action={(formData) => {
-          runAction(() => createJobAction(formData));
+          runAction(() => createJob(formData));
         }}
       >
         <h2 className="text-sm font-semibold md:col-span-2">Add application</h2>
@@ -132,7 +149,7 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
                           if (!isJobStatus(nextStatus)) {
                             return;
                           }
-                          runAction(() => moveJobAction(job.id, nextStatus));
+                          runAction(() => moveJob(job.id, nextStatus));
                         }}
                       >
                         {JOB_STATUSES.map((option) => (
@@ -159,7 +176,7 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
                           if (!window.confirm("Delete this application?")) {
                             return;
                           }
-                          runAction(() => deleteJobAction(job.id));
+                          runAction(() => deleteJob(job.id));
                         }}
                       >
                         Delete
@@ -170,7 +187,7 @@ export function KanbanBoard({ jobs }: { jobs: BoardJob[] }) {
                         className="flex flex-col gap-2"
                         action={(formData) => {
                           formData.set("id", job.id);
-                          runAction(() => updateJobAction(formData));
+                          runAction(() => updateJob(formData));
                         }}
                       >
                         <input name="company" defaultValue={job.company} required maxLength={200} disabled={pending} className={inputClass} />

@@ -385,6 +385,126 @@ describe("jobs isolation", () => {
     assert.equal(db.rows.length, 0);
   });
 
+  it("rejects an invalid update URL and leaves the row", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", url: "https://jobs.example/a" }),
+    ]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { url: "javascript:alert(1)" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows[0]?.url, "https://jobs.example/a");
+    assert.equal(db.rows[0]?.title, "Engineer");
+  });
+
+  it("rejects an invalid update status and leaves the row", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { status: "wishlist" as "applied" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Choose a valid column.");
+    }
+    assert.equal(db.rows[0]?.status, "applied");
+    assert.equal(db.rows[0]?.position, 0);
+  });
+
+  it("rejects an invalid update date and leaves the row", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { appliedAt: "not-a-date" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the applied date.");
+    }
+    assert.equal(db.rows[0]?.appliedAt.toISOString(), now.toISOString());
+  });
+
+  it("rejects overlong notes on update and leaves the row", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a", notes: "keep" })]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { notes: "n".repeat(4001) },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows[0]?.notes, "keep");
+  });
+
+  it("returns a save error when update storage throws and leaves the row", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", title: "Keep me", status: "applied" }),
+    ]);
+    db.$transaction = async () => {
+      throw new Error("db down");
+    };
+    const result = await updateJob("user-a", "a1", { title: "Changed" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(db.rows[0]?.title, "Keep me");
+    assert.equal(db.rows[0]?.status, "applied");
+  });
+
+  it("leaves the row unchanged when a column move fails in the store", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    db.job.updateMany = async () => {
+      throw new Error("db down");
+    };
+    const result = await updateJob("user-a", "a1", { status: "offer" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(db.rows[0]?.status, "applied");
+    assert.equal(db.rows[0]?.position, 0);
+    assert.equal(db.rows[0]?.title, "Engineer");
+  });
+
+  it("returns a save error when delete storage throws and leaves the row", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    db.job.deleteMany = async () => {
+      throw new Error("db down");
+    };
+    const result = await deleteJob("user-a", "a1", { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0]?.id, "a1");
+  });
+
   it("rejects an empty job id on update", async () => {
     const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
     const result = await updateJob("user-a", "  ", { title: "New title" }, { db });
