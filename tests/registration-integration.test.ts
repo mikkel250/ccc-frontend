@@ -93,4 +93,49 @@ describe("first-operator registration", () => {
     assert.equal(database.registrationClaim[0]?.id, 1);
     assert.equal(database.session.length, 1);
   });
+
+  it("releases the signup queue when validation fails before the transaction", async () => {
+    const database = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      registrationClaim: [],
+    };
+    const auth = betterAuth({
+      baseURL: "http://localhost:3000",
+      secret: "test-secret-test-secret-test-secret",
+      database: memoryAdapter(database),
+      emailAndPassword: { enabled: true, minPasswordLength: 8 },
+      plugins: [firstOperatorRegistration({ allowRegistration: "false" })],
+    });
+
+    await assert.rejects(() =>
+      auth.api.signUpEmail({
+        body: {
+          name: "Operator",
+          email: "not-an-email",
+          password: "test-password",
+        },
+      })
+    );
+
+    const signup = auth.api.signUpEmail({
+      body: {
+        name: "Operator",
+        email: "operator@example.com",
+        password: "test-password",
+      },
+    });
+    const result = await Promise.race([
+      signup,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("signup stayed queued")), 1_000);
+      }),
+    ]);
+
+    assert.equal(result.user.email, "operator@example.com");
+    assert.equal(database.user.length, 1);
+    assert.equal(database.registrationClaim.length, 1);
+  });
 });

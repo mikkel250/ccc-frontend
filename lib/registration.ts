@@ -34,47 +34,76 @@ function allowRegistrationValue(configured: string | undefined): string | undefi
   return configured ?? process.env.ALLOW_REGISTRATION;
 }
 
-function gateClosedSignUps(configured: string | undefined): (context: {
-  context: { adapter: TransactionAdapter };
-}) => Promise<void> {
+type SignUpSlot = {
+  adapter: TransactionAdapter;
+};
+
+function gateClosedSignUps(configured: string | undefined): {
+  enter: (slot: SignUpSlot) => Promise<void>;
+  leave: (slot: object | undefined) => void;
+} {
   let tail: Promise<void> = Promise.resolve();
+  // Serializes closed sign-ups for adapters that do not enforce registrationClaim's
+  // primary key (the memory adapter). Postgres still rejects a second claim across processes.
+  const releases = new WeakMap<object, () => void>();
 
-  return async (context) => {
-    if (registrationIsOpen(1, allowRegistrationValue(configured))) {
-      return;
-    }
-
-    const previous = tail;
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    tail = previous.then(() => gate, () => gate);
-    await previous.catch(() => undefined);
-
-    const adapter = context.context.adapter;
-    if (typeof adapter.transaction !== "function") {
-      release();
-      return;
-    }
-
-    const original = adapter.transaction.bind(adapter);
-    let settled = false;
-    const finish = () => {
-      if (settled) {
+  return {
+    async enter(slot) {
+      if (registrationIsOpen(1, allowRegistrationValue(configured))) {
         return;
       }
-      settled = true;
-      adapter.transaction = original;
-      release();
-    };
-    adapter.transaction = async (callback) => {
+
+      const previous = tail;
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      tail = previous.then(() => gate, () => gate);
+      await previous.catch(() => undefined);
+
+      const adapter = slot.adapter;
+      let settled = false;
+      let restore: (() => void) | undefined;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        releases.delete(slot);
+        restore?.();
+        release();
+      };
+
       try {
-        return await original(callback);
-      } finally {
+        if (typeof adapter.transaction !== "function") {
+          finish();
+          return;
+        }
+        const original = adapter.transaction.bind(adapter);
+        restore = () => {
+          adapter.transaction = original;
+        };
+        adapter.transaction = async (callback) => {
+          try {
+            return await original(callback);
+          } finally {
+            finish();
+          }
+        };
+        releases.set(slot, finish);
+      } catch (error) {
         finish();
+        throw error;
       }
-    };
+    },
+    leave(slot) {
+      if (!slot) {
+        return;
+      }
+      const finish = releases.get(slot);
+      releases.delete(slot);
+      finish?.();
+    },
   };
 }
 
@@ -90,11 +119,22 @@ export function firstOperatorRegistration(deps: {
           matcher: (context) => context.path === "/sign-up/email",
           handler: async (input) => {
             const endpoint = input as { context?: { adapter?: TransactionAdapter } };
-            const adapter = endpoint.context?.adapter;
-            if (!adapter) {
+            const slot = endpoint.context;
+            const adapter = slot?.adapter;
+            if (!slot || !adapter) {
               return;
             }
-            await gateSignUp({ context: { adapter } });
+            await gateSignUp.enter(slot as SignUpSlot);
+          },
+        },
+      ],
+      after: [
+        {
+          matcher: (context) => context.path === "/sign-up/email",
+          handler: async (input) => {
+            const endpoint = input as { context?: object };
+            gateSignUp.leave(endpoint.context);
+            return {};
           },
         },
       ],

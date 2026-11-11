@@ -28,8 +28,6 @@ export type TailorDeps = {
   timeoutMs?: number | undefined;
 };
 
-const SECRET_SUBSTRING_LEN = 8;
-
 const SAFE_CCC_ERRORS = new Set([
   "AI service error. Please try again.",
   "Cannot determine client IP",
@@ -73,30 +71,13 @@ export function resolveCccFetchTimeoutMs(
   return cccFetchTimeoutMs(undefined);
 }
 
-function errorContainsSecret(raw: string, secret: string | undefined): boolean {
-  if (!secret) {
-    return false;
-  }
-  if (raw.includes(secret)) {
-    return true;
-  }
-  if (secret.length < SECRET_SUBSTRING_LEN) {
-    return false;
-  }
-  for (let i = 0; i <= secret.length - SECRET_SUBSTRING_LEN; i++) {
-    if (raw.includes(secret.slice(i, i + SECRET_SUBSTRING_LEN))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-export function clientSafeError(raw: unknown, apiKey?: string): string {
+/** Never forward upstream text that is not an exact CCC error string. */
+export function clientSafeError(raw: unknown): string {
   if (typeof raw !== "string" || !raw.trim()) {
     return GENERIC_ERROR;
   }
   const trimmed = raw.trim();
-  if (!SAFE_CCC_ERRORS.has(trimmed) || errorContainsSecret(trimmed, apiKey)) {
+  if (!SAFE_CCC_ERRORS.has(trimmed)) {
     return GENERIC_ERROR;
   }
   return trimmed;
@@ -169,7 +150,7 @@ export async function tailorOnDemand(
     return {
       ok: false,
       status: response.status,
-      error: clientSafeError(record.error, apiKey),
+      error: clientSafeError(record.error),
     };
   }
 

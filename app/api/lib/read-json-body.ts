@@ -41,21 +41,6 @@ function bodyDeadline(timeoutMs: number): { promise: Promise<never>; clear: () =
   };
 }
 
-function cancelBody(body: ReadableStream<Uint8Array>): void {
-  const cancel = body.cancel;
-  if (typeof cancel !== "function") {
-    return;
-  }
-  try {
-    const result = cancel.call(body) as unknown;
-    if (result && typeof (result as Promise<unknown>).then === "function") {
-      void (result as Promise<unknown>).catch(() => undefined);
-    }
-  } catch {
-    return;
-  }
-}
-
 function contentLengthTooLarge(request: Request, maxBytes: number): boolean {
   const header = request.headers.get("content-length");
   if (header === null) {
@@ -81,22 +66,7 @@ async function readTextCapped(
       return { ok: true, text: "" };
     }
 
-    const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array> | undefined;
-    if (!reader) {
-      const pending = request.text();
-      try {
-        const text = await Promise.race([pending, deadline.promise]);
-        if (Buffer.byteLength(text, "utf8") > maxBytes) {
-          return { ok: false, tooLarge: true };
-        }
-        return { ok: true, text };
-      } catch (error) {
-        void pending.catch(() => undefined);
-        cancelBody(body);
-        return { ok: false, tooLarge: false, timedOut: isBodyTimeout(error) };
-      }
-    }
-
+    const reader = body.getReader();
     const chunks: Uint8Array[] = [];
     let total = 0;
     try {

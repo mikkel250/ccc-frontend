@@ -292,18 +292,17 @@ describe("tailorOnDemand", () => {
   });
 
   it("returns only allowlisted CCC errors", () => {
-    const apiKey = "sk-live-abcdefghijklmnopqrstuvwxyz";
-    assert.equal(clientSafeError("Unauthorized", apiKey), "Unauthorized");
-    assert.equal(clientSafeError("  AI service error. Please try again.  ", apiKey), "AI service error. Please try again.");
-    assert.equal(clientSafeError(`bad ${apiKey} suffix`, apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError("Unauthorized"), "Unauthorized");
+    assert.equal(clientSafeError("  AI service error. Please try again.  "), "AI service error. Please try again.");
+    assert.equal(clientSafeError("bad sk-live-abcdefghijklmnopqrstuvwxyz suffix"), GENERIC_ERROR);
     assert.equal(
-      clientSafeError("Senior React engineer. Requirements: TypeScript, React, Node.js.", apiKey),
+      clientSafeError("Senior React engineer. Requirements: TypeScript, React, Node.js."),
       GENERIC_ERROR
     );
-    assert.equal(clientSafeError("operator@example.com cannot tailor", apiKey), GENERIC_ERROR);
-    assert.equal(clientSafeError("Validation failed: too short", apiKey), GENERIC_ERROR);
-    assert.equal(clientSafeError("", apiKey), GENERIC_ERROR);
-    assert.equal(clientSafeError(12, apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError("operator@example.com cannot tailor"), GENERIC_ERROR);
+    assert.equal(clientSafeError("Validation failed: too short"), GENERIC_ERROR);
+    assert.equal(clientSafeError(""), GENERIC_ERROR);
+    assert.equal(clientSafeError(12), GENERIC_ERROR);
   });
 
   it("allows a JD of JD_MAX_CHARS and rejects JD_MAX_CHARS + 1 without fetching", async () => {
