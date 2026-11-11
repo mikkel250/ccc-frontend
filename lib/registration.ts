@@ -1,3 +1,5 @@
+import { registerSchemaCheck, schemaCheckFor } from "@better-auth/core/db/internal";
+import { tryGetCurrentAuthEndpointContext } from "@better-auth/core/context";
 import { APIError, getCurrentAdapter, type BetterAuthPlugin } from "better-auth";
 
 export const FIRST_OPERATOR_CLAIM_ID = 1;
@@ -38,6 +40,13 @@ type SignUpSlot = {
   adapter: TransactionAdapter;
 };
 
+const schemaChecksWrapped = new WeakSet<object>();
+
+function activeSignUpContext(): object | undefined {
+  const current = tryGetCurrentAuthEndpointContext() as { context?: object } | undefined;
+  return current?.context;
+}
+
 function gateClosedSignUps(configured: string | undefined): {
   enter: (slot: SignUpSlot) => Promise<void>;
   leave: (slot: object | undefined) => void;
@@ -46,6 +55,37 @@ function gateClosedSignUps(configured: string | undefined): {
   // Serializes closed sign-ups for adapters that do not enforce registrationClaim's
   // primary key (the memory adapter). Postgres still rejects a second claim across processes.
   const releases = new WeakMap<object, () => void>();
+
+  const releaseSlot = (slot: object | undefined) => {
+    if (!slot) {
+      return;
+    }
+    const finish = releases.get(slot);
+    releases.delete(slot);
+    finish?.();
+  };
+
+  const wrapSchemaCheck = (adapter: object) => {
+    if (schemaChecksWrapped.has(adapter)) {
+      return;
+    }
+    const prior = schemaCheckFor(adapter);
+    if (!prior) {
+      return;
+    }
+    schemaChecksWrapped.add(adapter);
+    // Schema mismatches reject before adapter.transaction, and that error never reaches the after hook.
+    registerSchemaCheck(adapter, () => {
+      const pending = prior();
+      if (!pending) {
+        return;
+      }
+      return Promise.resolve(pending).catch((error: unknown) => {
+        releaseSlot(activeSignUpContext());
+        throw error;
+      });
+    });
+  };
 
   return {
     async enter(slot) {
@@ -63,6 +103,7 @@ function gateClosedSignUps(configured: string | undefined): {
 
       const adapter = slot.adapter;
       let settled = false;
+      let depth = 0;
       let restore: (() => void) | undefined;
       const finish = () => {
         if (settled) {
@@ -73,36 +114,41 @@ function gateClosedSignUps(configured: string | undefined): {
         restore?.();
         release();
       };
+      releases.set(slot, finish);
 
       try {
         if (typeof adapter.transaction !== "function") {
           finish();
           return;
         }
+        wrapSchemaCheck(adapter);
         const original = adapter.transaction.bind(adapter);
         restore = () => {
           adapter.transaction = original;
         };
+        // A nested or foreign transaction must not open the queue. Only this
+        // sign-up's outermost transaction, or leave(), may release it.
         adapter.transaction = async (callback) => {
+          if (activeSignUpContext() !== slot) {
+            return original(callback);
+          }
+          depth += 1;
           try {
             return await original(callback);
           } finally {
-            finish();
+            depth -= 1;
+            if (depth === 0) {
+              finish();
+            }
           }
         };
-        releases.set(slot, finish);
       } catch (error) {
         finish();
         throw error;
       }
     },
     leave(slot) {
-      if (!slot) {
-        return;
-      }
-      const finish = releases.get(slot);
-      releases.delete(slot);
-      finish?.();
+      releaseSlot(slot);
     },
   };
 }

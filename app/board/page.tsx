@@ -2,14 +2,12 @@ import { listJobs, toBoardJob, type JobRecord } from "@/lib/jobs";
 import { requireSessionUserId } from "@/lib/session";
 import { KanbanBoard } from "./kanban-board";
 
-type BoardPageInput = {
-  params?: Promise<unknown>;
-  searchParams?: Promise<unknown>;
+type BoardRenderInput = {
   requireUserId?: () => Promise<string>;
   list?: (userId: string) => Promise<{ ok: true; jobs: JobRecord[] } | { ok: false; error: string }>;
 };
 
-export default async function BoardPage(input: BoardPageInput = {}) {
+export async function renderBoard(input: BoardRenderInput = {}) {
   const requireUserId = input.requireUserId ?? requireSessionUserId;
   const list = input.list ?? listJobs;
   const userId = await requireUserId();
@@ -36,4 +34,8 @@ export default async function BoardPage(input: BoardPageInput = {}) {
       <KanbanBoard jobs={listed.jobs.map(toBoardJob)} />
     </main>
   );
+}
+
+export default function BoardPage() {
+  return renderBoard();
 }

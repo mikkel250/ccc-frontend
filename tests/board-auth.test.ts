@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { middleware } from "../middleware";
-import BoardPage from "../app/board/page";
+import { renderBoard } from "../app/board/page";
 import { runJobAction } from "../lib/job-actions";
 import { requireSessionUserId } from "../lib/session";
 
@@ -33,7 +33,7 @@ describe("board authentication", () => {
     let listed = false;
     await assert.rejects(
       () =>
-        BoardPage({
+        renderBoard({
           requireUserId: () => requireSessionUserId(async () => null),
           list: async () => {
             listed = true;
