@@ -29,7 +29,7 @@ reviews:
   high_level_summary: true
   high_level_summary_in_walkthrough: false
   high_level_summary_instructions: >-
-    Summarize architectural, security, and contract risks only. Skip style and optional refactors. Explicitly call out any browser call to CCC, NEXT_PUBLIC_ secret, session bypass on tailor or jobs, job query missing userId, inbound X-Forwarded-For copied to CCC, curationMode other than strict, or Gmail/inbox/Master CV/LLM pipeline added in this repo. If the PR is docs-only, say so in one line.
+    Summarize architectural, security, and contract risks only. Skip style and optional refactors. Explicitly call out any browser call to CCC, NEXT_PUBLIC_ secret, session bypass on tailor or jobs, job query missing userId, inbound X-Forwarded-For / X-Real-IP / x-vercel-forwarded-for copied to CCC, curationMode other than strict, or Gmail/inbox/Master CV/LLM pipeline added in this repo. If the PR is docs-only, say so in one line.
 
   poem: false
   in_progress_fortune: false
@@ -285,7 +285,8 @@ reviews:
         Await async work. No sleep-based assertions.
 
         Cover: missing session does not call CCC; spoofed inbound
-        X-Forwarded-For is not forwarded; CCC 401 becomes 502 at
+        X-Forwarded-For, X-Real-IP, or x-vercel-forwarded-for is not
+        forwarded; CCC 401 becomes 502 at
         `handleTailorPost`; secret-like error strings are stripped; two user
         ids cannot read or mutate each other's jobs; registration stays closed
         after the first user unless `ALLOW_REGISTRATION=true`.
