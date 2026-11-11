@@ -30,6 +30,35 @@ export type TailorDeps = {
 
 const SECRET_SUBSTRING_LEN = 8;
 
+const SAFE_CCC_ERRORS = new Set([
+  "AI service error. Please try again.",
+  "Cannot determine client IP",
+  "Curator output failed schema validation",
+  "Curator output missing curated_cv in flexible wrapper",
+  "Curator output missing curated_cv in strict wrapper",
+  "Curator output missing reply_text",
+  "Curator output was not valid JSON",
+  "Curator prompt misconfigured",
+  "Failed to render CV document",
+  "Internal server error. Please try again later.",
+  "Invalid JSON in request body",
+  "Invalid request body",
+  "Master CV configuration is invalid",
+  "Master CV configuration is unavailable",
+  "Method not allowed. Use POST.",
+  "Rate limit exceeded",
+  "Rate limit service unavailable",
+  "Request body must be an object",
+  "Request body too large",
+  "Service unavailable",
+  "Tailor response exceeds configured size limit",
+  "Too many requests. Please wait before trying again.",
+  "Unauthorized",
+  "jobDescription exceeds configured size limit.",
+  "jobDescription is required.",
+  "jobDescription must be a non-empty string.",
+]);
+
 export function resolveCccFetchTimeoutMs(
   deps: Pick<TailorDeps, "timeoutMs"> = {},
   env?: { CCC_FETCH_TIMEOUT_MS?: string }
@@ -67,7 +96,7 @@ export function clientSafeError(raw: unknown, apiKey?: string): string {
     return GENERIC_ERROR;
   }
   const trimmed = raw.trim();
-  if (errorContainsSecret(trimmed, apiKey) || /bearer|api[_-]?key|tailor_api/i.test(trimmed)) {
+  if (!SAFE_CCC_ERRORS.has(trimmed) || errorContainsSecret(trimmed, apiKey)) {
     return GENERIC_ERROR;
   }
   return trimmed;

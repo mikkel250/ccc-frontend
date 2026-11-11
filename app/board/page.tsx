@@ -1,10 +1,19 @@
-import { listJobs, toBoardJob } from "@/lib/jobs";
+import { listJobs, toBoardJob, type JobRecord } from "@/lib/jobs";
 import { requireSessionUserId } from "@/lib/session";
 import { KanbanBoard } from "./kanban-board";
 
-export default async function BoardPage() {
-  const userId = await requireSessionUserId();
-  const listed = await listJobs(userId);
+type BoardPageInput = {
+  params?: Promise<unknown>;
+  searchParams?: Promise<unknown>;
+  requireUserId?: () => Promise<string>;
+  list?: (userId: string) => Promise<{ ok: true; jobs: JobRecord[] } | { ok: false; error: string }>;
+};
+
+export default async function BoardPage(input: BoardPageInput = {}) {
+  const requireUserId = input.requireUserId ?? requireSessionUserId;
+  const list = input.list ?? listJobs;
+  const userId = await requireUserId();
+  const listed = await list(userId);
   if (!listed.ok) {
     return (
       <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-8">

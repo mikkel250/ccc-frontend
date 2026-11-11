@@ -228,17 +228,37 @@ describe("tailorOnDemand", () => {
     }
   });
 
-  it("maps CCC 422 validation errors through", async () => {
-    const result = await tailorOnDemand("Senior engineer JD", {
+  it("maps an allowlisted CCC 422 message and hides other upstream text", async () => {
+    const listed = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
       apiKey: "secret-key-value",
       fetchImpl: async () =>
-        Response.json({ error: "Validation failed: job description is empty" }, { status: 422 }),
+        Response.json({ error: "Curator output was not valid JSON" }, { status: 422 }),
     });
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.equal(result.status, 422);
-      assert.equal(result.error, "Validation failed: job description is empty");
+    assert.equal(listed.ok, false);
+    if (!listed.ok) {
+      assert.equal(listed.status, 422);
+      assert.equal(listed.error, "Curator output was not valid JSON");
+    }
+
+    const leaked = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      fetchImpl: async () =>
+        Response.json(
+          {
+            error:
+              "Validation failed: job description is empty at http://10.0.0.8/internal\n    at tailor (pipeline.ts:1:1)",
+          },
+          { status: 422 }
+        ),
+    });
+    assert.equal(leaked.ok, false);
+    if (!leaked.ok) {
+      assert.equal(leaked.status, 422);
+      assert.equal(leaked.error, GENERIC_ERROR);
+      assert.equal(leaked.error.includes("10.0.0.8"), false);
+      assert.equal(leaked.error.includes("job description"), false);
     }
   });
 
@@ -271,27 +291,19 @@ describe("tailorOnDemand", () => {
     }
   });
 
-  it("redacts truncated API key substrings of 8+ characters", () => {
+  it("returns only allowlisted CCC errors", () => {
     const apiKey = "sk-live-abcdefghijklmnopqrstuvwxyz";
-    assert.equal(clientSafeError(`bad ${apiKey.slice(0, 12)} suffix`, apiKey), GENERIC_ERROR);
-    assert.equal(clientSafeError("Validation failed: too short", apiKey), "Validation failed: too short");
-  });
-
-  it("redacts a short API key only when the full key is present", () => {
-    const apiKey = "shortky";
-    assert.equal(apiKey.length < 8, true);
-    assert.equal(clientSafeError("failed shortky check", apiKey), GENERIC_ERROR);
-    assert.equal(clientSafeError("failed shortk check", apiKey), "failed shortk check");
-  });
-
-  it("does not redact an unrelated seven-character key fragment", () => {
-    const apiKey = "sk-live-abcdefghijklmnopqrstuvwxyz";
-    const seven = apiKey.slice(0, 7);
-    const eight = apiKey.slice(0, 8);
-    assert.equal(seven.length, 7);
-    assert.equal(eight.length, 8);
-    assert.equal(clientSafeError(`bad ${seven} suffix`, apiKey), `bad ${seven} suffix`);
-    assert.equal(clientSafeError(`bad ${eight} suffix`, apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError("Unauthorized", apiKey), "Unauthorized");
+    assert.equal(clientSafeError("  AI service error. Please try again.  ", apiKey), "AI service error. Please try again.");
+    assert.equal(clientSafeError(`bad ${apiKey} suffix`, apiKey), GENERIC_ERROR);
+    assert.equal(
+      clientSafeError("Senior React engineer. Requirements: TypeScript, React, Node.js.", apiKey),
+      GENERIC_ERROR
+    );
+    assert.equal(clientSafeError("operator@example.com cannot tailor", apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError("Validation failed: too short", apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError("", apiKey), GENERIC_ERROR);
+    assert.equal(clientSafeError(12, apiKey), GENERIC_ERROR);
   });
 
   it("allows a JD of JD_MAX_CHARS and rejects JD_MAX_CHARS + 1 without fetching", async () => {

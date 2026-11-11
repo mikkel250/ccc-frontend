@@ -56,4 +56,41 @@ describe("first-operator registration", () => {
     assert.equal(database.registrationClaim.length, 1);
     assert.equal(database.user.length, 1);
   });
+
+  it("lets exactly one of two concurrent first signups succeed", async () => {
+    const database: MemoryDB = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      registrationClaim: [],
+    };
+    const auth = betterAuth({
+      secret: "test-secret-at-least-32-characters-long",
+      baseURL: "http://localhost:3000",
+      database: memoryAdapter(database),
+      emailAndPassword: { enabled: true, minPasswordLength: 8 },
+      plugins: [firstOperatorRegistration({ allowRegistration: "false" })],
+    });
+    const signup = (email: string) =>
+      auth.api.signUpEmail({
+        body: {
+          name: "Operator",
+          email,
+          password: "test-password",
+        },
+      });
+
+    const results = await Promise.allSettled([
+      signup("one@example.com"),
+      signup("two@example.com"),
+    ]);
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(database.user.length, 1);
+    assert.equal(database.account.length, 1);
+    assert.equal(database.registrationClaim.length, 1);
+    assert.equal(database.registrationClaim[0]?.id, 1);
+    assert.equal(database.session.length, 1);
+  });
 });

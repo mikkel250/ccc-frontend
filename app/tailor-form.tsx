@@ -20,7 +20,46 @@ export function tailorFailureMessage(status: number, serverError: string | undef
   return serverError?.trim() || GENERIC_ERROR;
 }
 
-async function readTailorResponse(response: Response): Promise<TailorResponse> {
+export type TailorAttemptOutcome =
+  | { type: "ignored" }
+  | { type: "message"; message: string }
+  | { type: "success"; cv: string; replyText: string | null };
+
+export function settleTailorAttempt(input: {
+  mounted: boolean;
+  error?: unknown;
+  response?: { ok: boolean; status: number; body: TailorResponse };
+}): TailorAttemptOutcome {
+  if (!input.mounted) {
+    return { type: "ignored" };
+  }
+  if ("error" in input && input.error !== undefined) {
+    return {
+      type: "message",
+      message: isAbortError(input.error) ? TIMEOUT_ERROR : GENERIC_ERROR,
+    };
+  }
+  const response = input.response;
+  if (!response) {
+    return { type: "message", message: GENERIC_ERROR };
+  }
+  if (!response.ok) {
+    return {
+      type: "message",
+      message: tailorFailureMessage(response.status, response.body.error),
+    };
+  }
+  if (!response.body.cv) {
+    return { type: "message", message: GENERIC_ERROR };
+  }
+  return {
+    type: "success",
+    cv: response.body.cv,
+    replyText: response.body.replyText?.trim() ? response.body.replyText : null,
+  };
+}
+
+export async function readTailorResponse(response: Response): Promise<TailorResponse> {
   try {
     const parsed: unknown = await response.json();
     if (!parsed || typeof parsed !== "object") {
@@ -85,24 +124,21 @@ export function TailorForm() {
         signal: controller.signal,
       });
       const body = await readTailorResponse(response);
-      if (!mountedRef.current) {
-        return;
+      const outcome = settleTailorAttempt({
+        mounted: mountedRef.current,
+        response: { ok: response.ok, status: response.status, body },
+      });
+      if (outcome.type === "message") {
+        setError(outcome.message);
+      } else if (outcome.type === "success") {
+        setCv(outcome.cv);
+        setReplyText(outcome.replyText);
       }
-      if (!response.ok) {
-        setError(tailorFailureMessage(response.status, body.error));
-        return;
-      }
-      if (!body.cv) {
-        setError(GENERIC_ERROR);
-        return;
-      }
-      setCv(body.cv);
-      setReplyText(body.replyText?.trim() ? body.replyText : null);
     } catch (caught) {
-      if (!mountedRef.current) {
-        return;
+      const outcome = settleTailorAttempt({ mounted: mountedRef.current, error: caught });
+      if (outcome.type === "message") {
+        setError(outcome.message);
       }
-      setError(isAbortError(caught) ? TIMEOUT_ERROR : GENERIC_ERROR);
     } finally {
       window.clearTimeout(timeoutId);
       if (mountedRef.current) {

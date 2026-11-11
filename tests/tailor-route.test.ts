@@ -141,6 +141,61 @@ describe("readTailorJobDescription", () => {
     }
   });
 
+  it("cancels a non-streaming body when the read times out", async () => {
+    let cancelled = false;
+    let rejectRead: (error: Error) => void = () => undefined;
+    const body = {
+      getReader() {
+        return undefined;
+      },
+      cancel() {
+        cancelled = true;
+        rejectRead(Object.assign(new Error("cancelled"), { name: "AbortError" }));
+        return Promise.resolve();
+      },
+    };
+    const request = {
+      headers: new Headers({ "content-type": "application/json" }),
+      body,
+      text() {
+        return new Promise<string>((_resolve, reject) => {
+          rejectRead = reject;
+        });
+      },
+    } as unknown as Request;
+
+    const result = await Promise.race([
+      readTailorJobDescription(request, 1024, 20),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("body read stayed open")), 400);
+      }),
+    ]);
+    assert.equal(cancelled, true);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 408);
+      assert.equal(result.error, BODY_READ_TIMEOUT);
+    }
+  });
+
+  it("does not start text() when the request has no body", async () => {
+    let called = false;
+    const request = {
+      headers: new Headers(),
+      body: null,
+      text() {
+        called = true;
+        return new Promise<string>(() => undefined);
+      },
+    } as unknown as Request;
+    const result = await readTailorJobDescription(request, 1024, 30);
+    assert.equal(called, false);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.jobDescription, "");
+    }
+  });
+
   it("rejects a body over the cap with 413", async () => {
     const request = new Request("http://127.0.0.1/api/tailor", {
       method: "POST",
@@ -328,7 +383,8 @@ describe("POST /api/tailor", () => {
     process.env.TAILOR_API_KEY = "secret-key-value";
     const originalFetch = globalThis.fetch;
     const cases = [
-      { status: 422, error: "Validation failed", expected: "Validation failed" },
+      { status: 422, error: "Curator output was not valid JSON", expected: "Curator output was not valid JSON" },
+      { status: 422, error: "Validation failed: see http://10.0.0.8/internal", expected: GENERIC_ERROR },
       { status: 500, error: "Invalid Bearer TAILOR_API_KEY", expected: GENERIC_ERROR },
     ];
     try {
