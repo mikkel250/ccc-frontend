@@ -145,6 +145,9 @@ npm test
 # Lint
 npm run lint
 
+# Typecheck
+npm run typecheck
+
 # Build
 npm run build
 ```
@@ -219,9 +222,10 @@ This project uses the compound-engineering skill suite. Cursor via the compound-
 
 The core loop is: **Plan → Work → Review → Compound**.
 
-Before committing, run lint and tests:
+Before committing, run lint, typecheck, and tests:
 ```bash
 npm run lint
+npm run typecheck
 npm test
 ```
 

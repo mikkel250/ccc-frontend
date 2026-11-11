@@ -39,5 +39,9 @@ Register the first operator at `/register`, then sign in. `/` (tailor) and `POST
 ## Scripts
 
 - `npm run dev` — local UI
+- `npm run lint` — ESLint
+- `npm run typecheck` — `tsc --noEmit`
 - `npm test` — unit tests (mocked CCC and Prisma; no live LLM)
 - `npm run build` — `prisma generate` then production build
+
+Pull requests and pushes to `main` run lint, typecheck, and tests in GitHub Actions (`.github/workflows/ci.yml`). CI does not use GitHub secrets.
