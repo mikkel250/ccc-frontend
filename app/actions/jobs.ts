@@ -1,32 +1,15 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { createJob, deleteJob, updateJob, type JobStatus } from "@/lib/jobs";
-import { requireSessionUserId } from "@/lib/session";
+import { runJobAction } from "@/lib/job-actions";
 
 function formString(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
 }
 
-async function mutateBoard(
-  run: (userId: string) => Promise<{ ok: true } | { ok: false; error: string }>
-) {
-  const userId = await requireSessionUserId();
-  try {
-    const result = await run(userId);
-    if (!result.ok) {
-      return { error: result.error };
-    }
-    revalidatePath("/board");
-    return { ok: true as const };
-  } catch {
-    return { error: "Could not save. Please try again." };
-  }
-}
-
 export async function createJobAction(formData: FormData) {
-  return mutateBoard((userId) =>
+  return runJobAction((userId) =>
     createJob(userId, {
       company: formString(formData, "company"),
       title: formString(formData, "title"),
@@ -38,7 +21,7 @@ export async function createJobAction(formData: FormData) {
 }
 
 export async function updateJobAction(formData: FormData) {
-  return mutateBoard((userId) =>
+  return runJobAction((userId) =>
     updateJob(userId, formString(formData, "id"), {
       company: formString(formData, "company") || undefined,
       title: formString(formData, "title") || undefined,
@@ -50,9 +33,9 @@ export async function updateJobAction(formData: FormData) {
 }
 
 export async function deleteJobAction(jobId: string) {
-  return mutateBoard((userId) => deleteJob(userId, jobId));
+  return runJobAction((userId) => deleteJob(userId, jobId));
 }
 
 export async function moveJobAction(jobId: string, status: JobStatus) {
-  return mutateBoard((userId) => updateJob(userId, jobId, { status }));
+  return runJobAction((userId) => updateJob(userId, jobId, { status }));
 }
