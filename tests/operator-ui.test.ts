@@ -449,22 +449,15 @@ describe("kanban board", { concurrency: 1 }, () => {
   });
 
   it("shows pending and rejected board actions", async () => {
-    const holder: { container: HTMLElement | null } = { container: null };
+    let releaseCreate: () => void = () => undefined;
+    const createPending = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
     const view = await render(
       createElement(KanbanBoard, {
         jobs: [sampleJob],
         actions: {
-          createJob: async () => {
-            await new Promise((resolve) => setTimeout(resolve, 0));
-            const save = [...(holder.container?.querySelectorAll("button") ?? [])].find((button) =>
-              button.textContent?.includes("Saving")
-            );
-            assert.equal(save?.textContent, "Saving…");
-            assert.equal(save?.disabled, true);
-            const company = holder.container?.querySelector('input[name="company"]');
-            assert.equal(company instanceof HTMLInputElement && company.disabled, true);
-            return undefined;
-          },
+          createJob: () => createPending.then(() => undefined),
           updateJob: async () => ({ error: "Check the company, title, URL, and notes." }),
           moveJob: async () => {
             throw new Error("db down");
@@ -473,7 +466,6 @@ describe("kanban board", { concurrency: 1 }, () => {
         },
       })
     );
-    holder.container = view.container;
     try {
       const add = view.container.querySelector("form");
       assert.ok(add);
@@ -481,6 +473,17 @@ describe("kanban board", { concurrency: 1 }, () => {
       field(add, "title").value = "Designer";
       await act(async () => {
         add.requestSubmit();
+      });
+      const save = [...view.container.querySelectorAll("button")].find((button) =>
+        button.textContent?.includes("Saving")
+      );
+      assert.equal(save?.textContent, "Saving…");
+      assert.equal(save?.disabled, true);
+      const company = view.container.querySelector('input[name="company"]');
+      assert.equal(company instanceof HTMLInputElement && company.disabled, true);
+      releaseCreate();
+      await act(async () => {
+        await createPending;
       });
       assert.equal(view.container.querySelector("[role=alert]"), null);
 
