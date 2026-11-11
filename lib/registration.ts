@@ -30,6 +30,15 @@ function allowRegistrationValue(configured: string | undefined): string | undefi
   return configured ?? process.env.ALLOW_REGISTRATION;
 }
 
+function isUniqueConstraintError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code: unknown }).code === "P2002"
+  );
+}
+
 export function firstOperatorRegistration(deps: {
   allowRegistration?: string;
 } = {}): BetterAuthPlugin {
@@ -81,7 +90,10 @@ export function firstOperatorRegistration(deps: {
                       },
                       forceAllowId: true,
                     });
-                  } catch {
+                  } catch (error) {
+                    if (!isUniqueConstraintError(error)) {
+                      throw error;
+                    }
                     throw new APIError("FORBIDDEN", {
                       message: "Registration is closed.",
                     });

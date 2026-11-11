@@ -2,8 +2,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { memoryAdapter, type MemoryDB } from "@better-auth/memory-adapter";
 import { registerSchemaCheck, schemaCheckFor } from "@better-auth/core/db/internal";
-import { betterAuth } from "better-auth";
+import { APIError, betterAuth } from "better-auth";
 import { firstOperatorRegistration } from "../lib/registration";
+
+function assertRegistrationClosed(error: unknown): boolean {
+  assert.ok(error instanceof APIError);
+  assert.equal(error.statusCode, 403);
+  assert.equal(error.message, "Registration is closed.");
+  return true;
+}
 
 type SignUpAdapter = {
   transaction: (callback: (trx: never) => Promise<unknown>) => Promise<unknown>;
@@ -49,7 +56,7 @@ function databaseWithUniqueClaim(database: MemoryDB) {
       });
     }
     if (existing.state === "committed") {
-      return Promise.reject(new Error("unique constraint"));
+      return Promise.reject(Object.assign(new Error("unique constraint"), { code: "P2002" }));
     }
     return existing.settled.then(() => reserve(id));
   };
@@ -133,7 +140,7 @@ describe("first-operator registration", () => {
     assert.equal(database.registrationClaim[0]?.id, 1);
     assert.equal(database.user.length, 1);
 
-    await assert.rejects(signup("second-operator@example.com"));
+    await assert.rejects(signup("second-operator@example.com"), assertRegistrationClosed);
     assert.equal(database.registrationClaim.length, 1);
     assert.equal(database.user.length, 1);
   });
@@ -167,12 +174,68 @@ describe("first-operator registration", () => {
       signup("two@example.com"),
     ]);
     const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
     assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assertRegistrationClosed(rejected[0]?.reason);
     assert.equal(database.user.length, 1);
     assert.equal(database.account.length, 1);
     assert.equal(database.registrationClaim.length, 1);
     assert.equal(database.registrationClaim[0]?.id, 1);
     assert.equal(database.session.length, 1);
+  });
+
+  it("does not map non-unique claim insert errors to registration closed", async () => {
+    const database: MemoryDB = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      registrationClaim: [],
+    };
+    const createAdapter = memoryAdapter(database);
+    const auth = betterAuth({
+      secret: "test-secret-at-least-32-characters-long",
+      baseURL: "http://localhost:3000",
+      database: (options) => {
+        const adapter = createAdapter(options);
+        const transaction = adapter.transaction.bind(adapter);
+        adapter.transaction = (async (callback) => {
+          return transaction(async (trx) => {
+            const create = trx.create.bind(trx);
+            const claimAware = trx as {
+              create: (input: { model: string }) => Promise<unknown>;
+            };
+            claimAware.create = async (input) => {
+              if (input.model === "registrationClaim") {
+                throw Object.assign(new Error("db unavailable"), { code: "P1001" });
+              }
+              return create(input as Parameters<typeof create>[0]);
+            };
+            return callback(trx);
+          });
+        }) as typeof adapter.transaction;
+        return adapter;
+      },
+      emailAndPassword: { enabled: true, minPasswordLength: 8 },
+      plugins: [firstOperatorRegistration({ allowRegistration: "false" })],
+    });
+
+    await assert.rejects(() =>
+      auth.api.signUpEmail({
+        body: {
+          name: "Operator",
+          email: "operator@example.com",
+          password: "test-password",
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(!(error instanceof APIError && error.message === "Registration is closed."));
+        return true;
+      }
+    );
+    assert.equal(database.user.length, 0);
+    assert.equal(database.registrationClaim.length, 0);
   });
 
   it("accepts a signup after validation fails", async () => {
