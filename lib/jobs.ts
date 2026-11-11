@@ -293,18 +293,8 @@ export async function updateJob(
     return { ok: false, code: "invalid", error: "Job is required." };
   }
   const db = getDb(deps);
-  const existing = await withStore(
-    () => db.job.findFirst({ where: { id: jobId, userId } }),
-    "Could not save. Please try again."
-  );
-  if (isJobFailure(existing)) {
-    return existing;
-  }
-  if (!existing) {
-    return { ok: false, code: "not_found", error: "Job not found." };
-  }
   const patch: JobUpdateData = {};
-  let targetStatus: JobStatus | undefined;
+  let desiredStatus: JobStatus | undefined;
   if (input.company !== undefined) {
     const company = requiredNameSchema.safeParse(input.company);
     if (!company.success) {
@@ -347,18 +337,20 @@ export async function updateJob(
     if (!status.success) {
       return { ok: false, code: "invalid", error: "Choose a valid column." };
     }
-    if (status.data !== existing.status) {
-      patch.status = status.data;
-      targetStatus = status.data;
-    }
+    desiredStatus = status.data;
   }
   const saved = await withStore(
     () =>
       retryPositionConflict(() =>
         db.$transaction(async (tx) => {
+          const current = await tx.job.findFirst({ where: { id: jobId, userId } });
+          if (!current) {
+            return null;
+          }
           const transactionPatch = { ...patch };
-          if (targetStatus) {
-            transactionPatch.position = await nextPosition(tx, userId, targetStatus);
+          if (desiredStatus && desiredStatus !== current.status) {
+            transactionPatch.status = desiredStatus;
+            transactionPatch.position = await nextPosition(tx, userId, desiredStatus);
           }
           const updated = await tx.job.updateMany({
             where: { id: jobId, userId },
