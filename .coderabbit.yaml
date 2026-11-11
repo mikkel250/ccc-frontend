@@ -161,8 +161,9 @@ reviews:
           `handleTailorPost`. Pipeline logic does not belong in the route file.
         - Session check BEFORE any CCC call. No session → 401
           "Sign in required." and no `fetch`.
-        - Never copy the inbound `X-Forwarded-For` header. CCC sees
-          `TRUSTED_CCC_CLIENT_IP` (`127.0.0.1`) only.
+        - Never copy inbound `X-Forwarded-For`, `X-Real-IP`, or
+          `x-vercel-forwarded-for`. CCC sees `TRUSTED_CCC_CLIENT_IP`
+          (`127.0.0.1`) only.
         - Map CCC 401 and 403 to 502 so a session 401 stays distinct.
           Do not "fix" that by passing 401 through.
         - Success JSON is `{ cv, replyText }` only. Strip `curatedJson`,
