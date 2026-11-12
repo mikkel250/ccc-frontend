@@ -58,7 +58,18 @@ export async function handleTailorPost(
   });
   if (!result.ok) {
     const status = result.status === 401 || result.status === 403 ? 502 : result.status;
-    return NextResponse.json({ error: result.error }, { status });
+    const headers: HeadersInit = {};
+    if (
+      status === 429 &&
+      result.retryAfterSeconds != null &&
+      result.retryAfterSeconds >= 1
+    ) {
+      headers["Retry-After"] = String(result.retryAfterSeconds);
+    }
+    return NextResponse.json(
+      { error: result.error },
+      { status, headers: Object.keys(headers).length > 0 ? headers : undefined }
+    );
   }
   return NextResponse.json({ cv: result.cv, replyText: result.replyText });
 }

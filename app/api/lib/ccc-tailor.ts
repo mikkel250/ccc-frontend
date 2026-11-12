@@ -17,6 +17,7 @@ export type TailorFailure = {
   ok: false;
   status: number;
   error: string;
+  retryAfterSeconds?: number;
 };
 
 export type TailorResult = TailorSuccess | TailorFailure;
@@ -91,6 +92,28 @@ function isTimeoutOrAbortError(error: unknown): boolean {
   return error.name === "TimeoutError" || error.name === "AbortError";
 }
 
+export function resolveCccRetryAfterSeconds(
+  response: Response,
+  record: Record<string, unknown>,
+  now: number = Date.now()
+): number | undefined {
+  if (response.status !== 429) {
+    return undefined;
+  }
+  const header = response.headers.get("Retry-After");
+  if (header != null) {
+    const delaySeconds = Number.parseInt(header, 10);
+    if (Number.isFinite(delaySeconds) && delaySeconds >= 1) {
+      return delaySeconds;
+    }
+  }
+  const resetTime = record.resetTime;
+  if (typeof resetTime === "number" && Number.isFinite(resetTime)) {
+    return Math.max(1, Math.ceil((resetTime - now) / 1000));
+  }
+  return undefined;
+}
+
 export async function tailorOnDemand(
   jobDescription: string,
   deps: TailorDeps = {}
@@ -149,10 +172,12 @@ export async function tailorOnDemand(
 
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   if (!response.ok) {
+    const retryAfterSeconds = resolveCccRetryAfterSeconds(response, record);
     return {
       ok: false,
       status: response.status,
       error: clientSafeError(record.error),
+      ...(retryAfterSeconds != null ? { retryAfterSeconds } : {}),
     };
   }
 

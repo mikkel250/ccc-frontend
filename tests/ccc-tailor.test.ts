@@ -553,6 +553,47 @@ describe("tailorOnDemand", () => {
       assert.equal(result.error, "Curator output was not valid JSON");
     }
   });
+
+  it("maps CCC 429 Retry-After to retryAfterSeconds", async () => {
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({ error: "Too many requests. Please wait before trying again." }),
+          {
+            status: 429,
+            headers: { "Retry-After": "45", "content-type": "application/json" },
+          }
+        ),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 429);
+      assert.equal(result.retryAfterSeconds, 45);
+    }
+  });
+
+  it("derives retryAfterSeconds from resetTime when Retry-After is missing", async () => {
+    const now = Date.now();
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      fetchImpl: async () =>
+        Response.json(
+          {
+            error: "Too many requests. Please wait before trying again.",
+            resetTime: now + 30_000,
+          },
+          { status: 429 }
+        ),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 429);
+      assert.equal(result.retryAfterSeconds, 30);
+    }
+  });
 });
 
 describe("handleTailorPost", () => {
@@ -618,6 +659,28 @@ describe("handleTailorPost", () => {
     assert.equal(seenSessionId, "user-a");
     const body = (await response.json()) as { cv?: string };
     assert.equal(body.cv, "UEsDbA==");
+  });
+
+  it("forwards Retry-After when CCC returns 429", async () => {
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
+        tailor: async () => ({
+          ok: false,
+          status: 429,
+          error: "Too many requests. Please wait before trying again.",
+          retryAfterSeconds: 60,
+        }),
+      }
+    );
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("Retry-After"), "60");
   });
 
   it("returns 429 for an exhausted user without calling CCC, while another user is allowed", async () => {

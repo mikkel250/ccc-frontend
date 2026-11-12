@@ -32,13 +32,13 @@ Dual Upstash sliding-window ceilings (R21):
 
 | Bucket | Env var | Default |
 |--------|---------|---------|
-| Per client IP | `RATE_LIMIT_MAX` | `5` |
+| Per caller (`session:<id>` after successful auth, else client IP) | `RATE_LIMIT_MAX` | `5` |
 | Per shared-secret hash | `RATE_LIMIT_SECRET_MAX` | `floor(RATE_LIMIT_MAX / 2)` (min 1) |
 | Window | `RATE_LIMIT_WINDOW` | `60000` ms |
 
-Success responses return the **more restrictive** `remaining` / `resetTime` of the two buckets. CCC does **not** currently key those buckets on `sessionId`.
+Success responses return the **more restrictive** `remaining` / `resetTime` of the two buckets. After successful Bearer, a usable body `sessionId` keys the per-caller bucket as `session:<id>`. Omitted or invalid `sessionId` keeps the rightmost `x-forwarded-for` IP. Failed auth never honors `sessionId`. The hashed-secret bucket remains the global cap.
 
-**ccc-frontend BFF:** after a valid session, this app applies a best-effort per-user window to tailor and job mutations (see `.env.example` `RATE_LIMIT_*` / `JOB_RATE_LIMIT_MAX`). The window is in-memory and process-local: it resets on restart and is not shared across instances. `POST /api/tailor` sends CCC `sessionId` equal to that user id next to the existing Bearer key. It does not copy inbound client headers. CCC still ignores `sessionId` for spend until a companion change; the hashed-secret bucket remains the global CCC cap.
+**ccc-frontend BFF:** after a valid session, this app applies a best-effort per-user window to tailor and job mutations (see `.env.example` `RATE_LIMIT_*` / `JOB_RATE_LIMIT_MAX`). The window is in-memory and process-local: it resets on restart and is not shared across instances. `POST /api/tailor` sends CCC `sessionId` equal to that user id next to the existing Bearer key. It does not copy inbound client headers. On limit, the BFF returns `{ "error": "..." }` with a `Retry-After` delay-seconds header only (no `remaining` / `resetTime` in the JSON body). When CCC returns 429, the BFF forwards `Retry-After` when CCC supplies `Retry-After` or a numeric `resetTime` in the upstream JSON.
 
 ```json
 HTTP 429
@@ -48,6 +48,8 @@ HTTP 429
   "resetTime": 1717632000000
 }
 ```
+
+(Upstream CCC may include `remaining` / `resetTime`; the BFF tailors JSON does not.)
 
 ---
 
