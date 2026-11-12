@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CLIENT_FETCH_TIMEOUT_MS, GENERIC_ERROR, TIMEOUT_ERROR } from "./lib/tailor-constants";
 
 type TailorResponse = {
   cv?: string;
@@ -8,12 +9,94 @@ type TailorResponse = {
   error?: string;
 };
 
+function isAbortError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
+}
+
+export function tailorFailureMessage(status: number, serverError: string | undefined): string {
+  if (status === 504) {
+    return TIMEOUT_ERROR;
+  }
+  return serverError?.trim() || GENERIC_ERROR;
+}
+
+export type TailorAttemptOutcome =
+  | { type: "ignored" }
+  | { type: "message"; message: string }
+  | { type: "success"; cv: string; replyText: string | null };
+
+export function settleTailorAttempt(input: {
+  mounted: boolean;
+  error?: unknown;
+  response?: { ok: boolean; status: number; body: TailorResponse };
+}): TailorAttemptOutcome {
+  if (!input.mounted) {
+    return { type: "ignored" };
+  }
+  if ("error" in input && input.error !== undefined) {
+    return {
+      type: "message",
+      message: isAbortError(input.error) ? TIMEOUT_ERROR : GENERIC_ERROR,
+    };
+  }
+  const response = input.response;
+  if (!response) {
+    return { type: "message", message: GENERIC_ERROR };
+  }
+  if (!response.ok) {
+    return {
+      type: "message",
+      message: tailorFailureMessage(response.status, response.body.error),
+    };
+  }
+  if (!response.body.cv) {
+    return { type: "message", message: GENERIC_ERROR };
+  }
+  return {
+    type: "success",
+    cv: response.body.cv,
+    replyText: response.body.replyText?.trim() ? response.body.replyText : null,
+  };
+}
+
+export async function readTailorResponse(response: Response): Promise<TailorResponse> {
+  try {
+    const parsed: unknown = await response.json();
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    const record = parsed as Record<string, unknown>;
+    return {
+      cv: typeof record.cv === "string" ? record.cv : undefined,
+      replyText:
+        typeof record.replyText === "string" || record.replyText === null ? record.replyText : undefined,
+      error: typeof record.error === "string" ? record.error : undefined,
+    };
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    return {};
+  }
+}
+
 export function TailorForm() {
   const [jobDescription, setJobDescription] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cv, setCv] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const attemptRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -25,6 +108,14 @@ export function TailorForm() {
       return;
     }
 
+    // Advance first so only this attempt may update the form.
+    const attempt = ++attemptRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const timeoutId = window.setTimeout(() => controller.abort(), CLIENT_FETCH_TIMEOUT_MS);
+    const stillCurrent = () => mountedRef.current && attemptRef.current === attempt;
+
     setPending(true);
     setError(null);
     setCv(null);
@@ -34,22 +125,35 @@ export function TailorForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobDescription: jd }),
+        signal: controller.signal,
       });
-      const body = (await response.json()) as TailorResponse;
-      if (!response.ok) {
-        setError(body.error || "Tailor request failed. Please try again.");
+      const body = await readTailorResponse(response);
+      if (!stillCurrent()) {
         return;
       }
-      if (!body.cv) {
-        setError("Tailor request failed. Please try again.");
+      const outcome = settleTailorAttempt({
+        mounted: true,
+        response: { ok: response.ok, status: response.status, body },
+      });
+      if (outcome.type === "message") {
+        setError(outcome.message);
+      } else if (outcome.type === "success") {
+        setCv(outcome.cv);
+        setReplyText(outcome.replyText);
+      }
+    } catch (caught) {
+      if (!stillCurrent()) {
         return;
       }
-      setCv(body.cv);
-      setReplyText(body.replyText?.trim() ? body.replyText : null);
-    } catch {
-      setError("Tailor request failed. Please try again.");
+      const outcome = settleTailorAttempt({ mounted: true, error: caught });
+      if (outcome.type === "message") {
+        setError(outcome.message);
+      }
     } finally {
-      setPending(false);
+      window.clearTimeout(timeoutId);
+      if (stillCurrent()) {
+        setPending(false);
+      }
     }
   }
 

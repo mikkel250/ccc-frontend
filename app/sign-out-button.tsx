@@ -3,7 +3,19 @@
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 
-export function SignOutButton() {
+type SignOutResult = { error: { message?: string } | null };
+
+type SignOutButtonProps = {
+  signOut?: () => Promise<SignOutResult>;
+  goToLogin?: () => void;
+};
+
+export function SignOutButton({
+  signOut = () => authClient.signOut(),
+  goToLogin = () => {
+    window.location.assign("/login");
+  },
+}: SignOutButtonProps) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -11,12 +23,12 @@ export function SignOutButton() {
     setPending(true);
     setError(null);
     try {
-      const { error: signOutError } = await authClient.signOut();
+      const { error: signOutError } = await signOut();
       if (signOutError) {
         setError(signOutError.message || "Sign out failed. Please try again.");
         return;
       }
-      window.location.assign("/login");
+      goToLogin();
     } catch {
       setError("Sign out failed. Please try again.");
     } finally {

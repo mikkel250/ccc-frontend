@@ -1,3 +1,10 @@
+import {
+  cccFetchTimeoutMs,
+  GENERIC_ERROR,
+  MISSING_ENV,
+  TRUSTED_CCC_CLIENT_IP,
+} from "../../lib/tailor-constants";
+
 export const JD_MAX_CHARS = 50_000;
 
 export type TailorSuccess = {
@@ -18,18 +25,69 @@ export type TailorDeps = {
   fetchImpl?: typeof fetch;
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
-  clientIp?: string | undefined;
+  timeoutMs?: number | undefined;
 };
 
-const GENERIC_ERROR = "Tailor request failed. Please try again.";
-const MISSING_ENV = "Tailor service is not configured.";
-export const TRUSTED_CCC_CLIENT_IP = "127.0.0.1";
+const SAFE_CCC_ERRORS = new Set([
+  "AI service error. Please try again.",
+  "Cannot determine client IP",
+  "Curator output failed schema validation",
+  "Curator output missing curated_cv in flexible wrapper",
+  "Curator output missing curated_cv in strict wrapper",
+  "Curator output missing reply_text",
+  "Curator output was not valid JSON",
+  "Curator prompt misconfigured",
+  "Failed to render CV document",
+  "Internal server error. Please try again later.",
+  "Invalid JSON in request body",
+  "Invalid request body",
+  "Master CV configuration is invalid",
+  "Master CV configuration is unavailable",
+  "Method not allowed. Use POST.",
+  "Rate limit exceeded",
+  "Rate limit service unavailable",
+  "Request body must be an object",
+  "Request body too large",
+  "Service unavailable",
+  "Tailor response exceeds configured size limit",
+  "Too many requests. Please wait before trying again.",
+  "Unauthorized",
+  "jobDescription exceeds configured size limit.",
+  "jobDescription is required.",
+  "jobDescription must be a non-empty string.",
+]);
 
-function clientSafeError(raw: unknown): string {
-  if (typeof raw === "string" && raw.trim() && !/bearer|api[_-]?key|tailor_api/i.test(raw)) {
-    return raw.trim();
+export function resolveCccFetchTimeoutMs(
+  deps: Pick<TailorDeps, "timeoutMs"> = {},
+  env?: { CCC_FETCH_TIMEOUT_MS?: string }
+): number {
+  if (typeof deps.timeoutMs === "number" && Number.isFinite(deps.timeoutMs) && deps.timeoutMs > 0) {
+    return cccFetchTimeoutMs(deps.timeoutMs);
   }
-  return GENERIC_ERROR;
+  const fromEnv = Number((env ?? process.env).CCC_FETCH_TIMEOUT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return cccFetchTimeoutMs(fromEnv);
+  }
+  return cccFetchTimeoutMs(undefined);
+}
+
+/** Never forward upstream text that is not an exact CCC error string. */
+export function clientSafeError(raw: unknown): string {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return GENERIC_ERROR;
+  }
+  const trimmed = raw.trim();
+  if (!SAFE_CCC_ERRORS.has(trimmed)) {
+    return GENERIC_ERROR;
+  }
+  return trimmed;
+}
+
+function isTimeoutOrAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("name" in error)) {
+    return false;
+  }
+  return error.name === "TimeoutError" || error.name === "AbortError";
 }
 
 export async function tailorOnDemand(
@@ -55,7 +113,6 @@ export async function tailorOnDemand(
   }
 
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const clientIp = deps.clientIp?.trim() || TRUSTED_CCC_CLIENT_IP;
   let response: Response;
   try {
     response = await fetchImpl(`${apiUrl}/api/tailor-cv`, {
@@ -63,21 +120,28 @@ export async function tailorOnDemand(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        "x-forwarded-for": clientIp,
+        "x-forwarded-for": TRUSTED_CCC_CLIENT_IP,
       },
       body: JSON.stringify({
         jobDescription: jd,
         curationMode: "strict",
       }),
+      signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps)),
     });
-  } catch {
+  } catch (error) {
+    if (isTimeoutOrAbortError(error)) {
+      return { ok: false, status: 504, error: GENERIC_ERROR };
+    }
     return { ok: false, status: 503, error: GENERIC_ERROR };
   }
 
   let body: unknown = null;
   try {
     body = await response.json();
-  } catch {
+  } catch (error) {
+    if (isTimeoutOrAbortError(error)) {
+      return { ok: false, status: 504, error: GENERIC_ERROR };
+    }
     body = null;
   }
 

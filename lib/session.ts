@@ -22,8 +22,8 @@ export async function getSessionUserId(
   return readSessionUserId();
 }
 
-export async function requireSessionUserId(): Promise<string> {
-  const userId = await getSessionUserId();
+export async function requireSessionUserId(getSession?: SessionLookup): Promise<string> {
+  const userId = await getSessionUserId(getSession);
   if (!userId) {
     redirect("/login");
   }

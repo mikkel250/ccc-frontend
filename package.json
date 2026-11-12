@@ -6,7 +6,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack -H 127.0.0.1",
     "build": "prisma generate && next build --turbopack",
     "start": "next start",
     "lint": "eslint",
@@ -31,6 +31,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.25",
+    "happy-dom": "^21.0.4",
     "tailwindcss": "^4",
     "tsx": "^4.19.0",
     "typescript": "^5"

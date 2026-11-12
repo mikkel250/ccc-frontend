@@ -8,19 +8,17 @@ import { publicRegistrationAllowed, registrationIsOpen } from "../lib/registrati
 describe("Job Prisma schema", () => {
   const schema = readFileSync(join(process.cwd(), "prisma/schema.prisma"), "utf8");
 
-  it("requires Job.userId, defaults appliedAt, and types status as the four-value enum", () => {
+  it("requires Job.userId, defaults appliedAt, and has four statuses", () => {
     const jobModel = schema.match(/model Job \{[\s\S]*?\n\}/)?.[0] ?? "";
-    const statusEnum = schema.match(/enum JobStatus \{([\s\S]*?)\n\}/)?.[1] ?? "";
-    const statusMembers = statusEnum
-      .split("\n")
-      .map((line) => line.replace(/\/\/.*$/, "").trim())
-      .filter((line) => line.length > 0);
     assert.match(jobModel, /^\s*userId\s+String$/m);
     assert.doesNotMatch(jobModel, /^\s*userId\s+String\?/m);
     assert.match(jobModel, /appliedAt\s+DateTime\s+@default\(now\(\)\)/);
-    assert.match(jobModel, /^\s*status\s+JobStatus$/m);
-    assert.doesNotMatch(jobModel, /^\s*status\s+JobStatus\?/m);
-    assert.deepEqual(statusMembers, [...JOB_STATUSES]);
+    assert.match(jobModel, /^\s*status\s+JobStatus\s*$/m);
+    const statusEnum = schema.match(/enum JobStatus \{([\s\S]*?)\}/)?.[1] ?? "";
+    const members = [...statusEnum.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/gm)].map(
+      (match) => match[1]
+    );
+    assert.deepEqual(members, [...JOB_STATUSES]);
     assert.match(jobModel, /@@unique\(\[userId, status, position\]\)/);
   });
 

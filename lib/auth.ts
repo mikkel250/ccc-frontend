@@ -4,7 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { prisma } from "./prisma";
 import { firstOperatorRegistration } from "./registration";
 
-const origin = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+const origin = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:3000";
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,

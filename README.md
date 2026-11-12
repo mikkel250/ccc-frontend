@@ -17,7 +17,7 @@ cp .env.example .env
 # Generate BETTER_AUTH_SECRET (openssl rand -base64 32).
 # Set TAILOR_API_KEY (same secret as CCC).
 # Point CCC_API_URL at a running CCC API.
-# BETTER_AUTH_URL must match the browser origin (http://localhost:3000 locally).
+# BETTER_AUTH_URL must match the browser origin (http://127.0.0.1:3000 locally).
 
 docker compose up -d
 npm install
@@ -25,7 +25,7 @@ npx prisma migrate deploy
 npm run dev
 ```
 
-This app defaults to port **3000**. Run CCC on **3001** (or set `CCC_API_URL`). Postgres is bound to **127.0.0.1:5432**.
+`npm run dev` binds to **127.0.0.1** so the signed-in tailor proxy is not exposed on the LAN. This app defaults to port **3000**. Run CCC on **3001** (or set `CCC_API_URL`). Postgres is bound to **127.0.0.1:5432**.
 
 ```bash
 # in the CCC repo

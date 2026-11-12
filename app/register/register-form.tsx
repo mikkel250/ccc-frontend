@@ -4,7 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
-export function RegisterForm() {
+type SignUpResult = { error: { message?: string } | null };
+
+type RegisterFormProps = {
+  signUp?: (input: { email: string; password: string; name: string }) => Promise<SignUpResult>;
+};
+
+export function RegisterForm({
+  signUp = (input) => authClient.signUp.email(input),
+}: RegisterFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,7 +25,7 @@ export function RegisterForm() {
     setError(null);
     const name = email.split("@")[0] || "operator";
     try {
-      const { error: signUpError } = await authClient.signUp.email({
+      const { error: signUpError } = await signUp({
         email,
         password,
         name,

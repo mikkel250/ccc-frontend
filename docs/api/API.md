@@ -183,14 +183,16 @@ npm run regen-docx -- path/to/curated.json out.docx --builder-version=1.0.0
 
 ## `curl` Examples
 
-```bash
-curl http://localhost:3000/api/hello
+These commands call CCC itself (`/api/hello`, `/api/tailor-cv`). This app listens on port 3000 and proxies through `POST /api/tailor`. Use port 3001 when CCC runs beside this UI.
 
-curl -s -X POST http://localhost:3000/api/tailor-cv \
+```bash
+curl http://localhost:3001/api/hello
+
+curl -s -X POST http://localhost:3001/api/tailor-cv \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TAILOR_API_KEY" \
   -d '{"jobDescription": "Senior React engineer. Requirements: TypeScript, React, Node.js."}' \
-  | tee /tmp/tailor.json | jq -r '.cv' | base64 -d > /tmp/wayfare-mgr.docx
+  | tee /tmp/tailor.json | jq -r '.cv' | base64 -d > /tmp/tailored-cv.docx
 ```
 
 When calling from a JD file, save the decoded `.docx` as the JD basename (same convention as `npm run smoke`, which writes `tmp/smoke/<jd-slug>.docx` and `tmp/smoke/<jd-slug>.curated.json`).

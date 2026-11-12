@@ -26,6 +26,19 @@ export async function publicRegistrationAllowed(deps: {
   return registrationIsOpen(exists ? 1 : 0, allowRegistration);
 }
 
+function allowRegistrationValue(configured: string | undefined): string | undefined {
+  return configured ?? process.env.ALLOW_REGISTRATION;
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code: unknown }).code === "P2002"
+  );
+}
+
 export function firstOperatorRegistration(deps: {
   allowRegistration?: string;
 } = {}): BetterAuthPlugin {
@@ -49,14 +62,14 @@ export function firstOperatorRegistration(deps: {
                 async before(_user, endpointContext) {
                   if (
                     endpointContext?.path !== "/sign-up/email" ||
-                    registrationIsOpen(
-                      1,
-                      deps.allowRegistration ?? process.env.ALLOW_REGISTRATION
-                    )
+                    registrationIsOpen(1, allowRegistrationValue(deps.allowRegistration))
                   ) {
                     return;
                   }
 
+                  // Sign-up runs this hook inside its database transaction.
+                  // registration_claim.id is the lock: a second insert fails
+                  // and rolls the user back with it.
                   const adapter = await getCurrentAdapter(context.adapter);
                   const existingUserCount = await adapter.count({
                     model: "user",
@@ -81,7 +94,10 @@ export function firstOperatorRegistration(deps: {
                       },
                       forceAllowId: true,
                     });
-                  } catch {
+                  } catch (error) {
+                    if (!isUniqueConstraintError(error)) {
+                      throw error;
+                    }
                     throw new APIError("FORBIDDEN", {
                       message: "Registration is closed.",
                     });
