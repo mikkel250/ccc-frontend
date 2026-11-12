@@ -96,7 +96,6 @@ The existing tailor page and `POST /api/tailor` require the same session so `TAI
 - Email verification and password reset (record as follow-up if Better Auth plugins are easy; not required to ship M2).
 - Postgres RLS as a second isolation line (app-layer `userId` filter is required; RLS is optional hardening).
 - Saving tailor `cv` / `replyText` onto a job card.
-- Per-user tailor rate limits beyond CCC’s existing buckets.
 
 **Outside this product's identity**
 
@@ -110,6 +109,7 @@ The existing tailor page and `POST /api/tailor` require the same session so `TAI
 This plan owns **Kanban job tracker** (README M2).
 
 - M1 on-demand tailor — **already in this repo.** This plan adds session to that surface. It does not replace the proxy helper.
+- Per-user BFF rate limits — **owned by** [User ID rate limit](./2026-11-10-2327-feat-user-id-rate-limit-plan.md). This plan does not implement that ceiling.
 - CCC inbox worker — **Can proceed independently** in the CCC repo.
 - M3 Gantt — **Depends on** M2 job rows and dates. Parked.
 - M4 Automated nudges — **Depends on** M2 (and dates). Parked.

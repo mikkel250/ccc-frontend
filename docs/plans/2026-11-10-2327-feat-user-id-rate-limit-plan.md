@@ -209,7 +209,7 @@ U1 helper + tests → U2 tailor path → U3 job actions → U4 Better Auth pre-a
 - CCC `app/api/lib/rate-limit.ts`: dual IP + secret-hash buckets; `_sessionId` reserved and unused; missing IP → 400; rightmost XFF
 - Better Auth 1.7.3 rate-limit docs: default XFF; `ipAddressHeaders: []` shares one counter per path; no `keyGenerator`
 - PR #13: reject `client-ip.ts`; keep `wrapJob`
-- Kanban plan deferred “per-user tailor rate limits beyond CCC’s existing buckets”; this plan un-defers that BFF ceiling only
+- Kanban plan leaves per-user tailor rate limits out of M2; this plan owns that BFF ceiling
 
 ---
 

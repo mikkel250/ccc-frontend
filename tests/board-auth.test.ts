@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { memoryAdapter, type MemoryDB } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth";
 import { NextRequest } from "next/server";
+import { handleTailorPost } from "../app/api/lib/tailor-post";
 import { middleware } from "../middleware";
 import { renderBoard } from "../app/board/page";
 import { runJobAction } from "../lib/job-actions";
@@ -110,11 +111,39 @@ describe("board authentication", () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("location"), null);
 
+    const tailorRequest = new Request("http://127.0.0.1/api/tailor", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: forgedCookie,
+      },
+      body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+    });
+    let tailored = false;
+    const apiResponse = await handleTailorPost(tailorRequest, {
+      getSessionUserId: async () => {
+        const session = await auth.api.getSession({ headers: tailorRequest.headers });
+        return session?.user.id ?? null;
+      },
+      tailor: async () => {
+        tailored = true;
+        return { ok: true, cv: "UEsDbA==", replyText: null };
+      },
+    });
+    assert.equal(apiResponse.status, 401);
+    assert.equal(tailored, false);
+
     let listed = false;
     await assert.rejects(
       () =>
         renderBoard({
-          requireUserId: () => requireSessionUserId(async () => null),
+          requireUserId: () =>
+            requireSessionUserId(async () => {
+              const session = await auth.api.getSession({
+                headers: new Headers({ cookie: forgedCookie }),
+              });
+              return session?.user.id ? { user: { id: session.user.id } } : null;
+            }),
           list: async () => {
             listed = true;
             return { ok: true, jobs: [] };

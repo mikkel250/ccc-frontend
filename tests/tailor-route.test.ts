@@ -256,6 +256,37 @@ describe("POST /api/tailor", () => {
     assert.equal(body.error, INVALID_JSON);
   });
 
+  it("returns 400 for non-object JSON without consuming the rate limit or calling CCC", async () => {
+    for (const raw of ["null", "[]", "123"]) {
+      let consumed = 0;
+      let called = false;
+      const response = await handleTailorPost(
+        new Request("http://127.0.0.1/api/tailor", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: raw,
+        }),
+        {
+          ...signedIn,
+          consume: () => {
+            consumed += 1;
+            return { ok: true as const };
+          },
+          tailor: async () => {
+            called = true;
+            return { ok: true, cv: "UEsDbA==", replyText: null };
+          },
+        }
+      );
+      assert.equal(response.status, 400, raw);
+      const body = (await response.json()) as { error?: string };
+      assert.equal(body.error, "Job description is required.");
+      assert.notEqual(body.error, INVALID_JSON);
+      assert.equal(consumed, 0, raw);
+      assert.equal(called, false, raw);
+    }
+  });
+
   it("ignores non-string jobDescription values", async () => {
     let called = false;
     const response = await handleTailorPost(
