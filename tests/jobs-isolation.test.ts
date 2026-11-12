@@ -10,14 +10,8 @@ import {
 } from "../lib/jobs";
 import { createMemoryStore } from "./memory-jobs-store";
 
-function positionConflict(): Error {
-  return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
-}
-
 function allowOverlappingPositionConflicts(db: ReturnType<typeof createMemoryStore>): void {
   const aggregate = db.job.aggregate.bind(db.job);
-  const create = db.job.create.bind(db.job);
-  const updateMany = db.job.updateMany.bind(db.job);
   let readers = 0;
   let releaseBoth: () => void = () => {};
   const bothRead = new Promise<void>((resolve) => {
@@ -33,35 +27,6 @@ function allowOverlappingPositionConflicts(db: ReturnType<typeof createMemorySto
       await bothRead;
     }
     return snapshot;
-  };
-  db.job.create = async (args) => {
-    const taken = db.rows.some(
-      (row) =>
-        row.userId === args.data.userId &&
-        row.status === args.data.status &&
-        row.position === args.data.position
-    );
-    if (taken) {
-      throw positionConflict();
-    }
-    return create(args);
-  };
-  db.job.updateMany = async (args) => {
-    const status = args.data.status;
-    const position = args.data.position;
-    if (status !== undefined && position !== undefined) {
-      const taken = db.rows.some(
-        (row) =>
-          row.id !== args.where.id &&
-          row.userId === args.where.userId &&
-          row.status === status &&
-          row.position === position
-      );
-      if (taken) {
-        throw positionConflict();
-      }
-    }
-    return updateMany(args);
   };
 }
 
@@ -181,15 +146,17 @@ describe("jobs isolation", () => {
   });
 
   it("retries a create when its position conflicts", async () => {
-    const db = createMemoryStore();
-    const create = db.job.create;
-    let attempts = 0;
-    db.job.create = async (args) => {
-      attempts += 1;
-      if (attempts === 1) {
-        throw Object.assign(new Error("position conflict"), { code: "P2002" });
+    const db = createMemoryStore([
+      seedJob({ id: "taken", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    const aggregate = db.job.aggregate.bind(db.job);
+    let reads = 0;
+    db.job.aggregate = async (args) => {
+      reads += 1;
+      if (reads === 1) {
+        return { _max: { position: null } };
       }
-      return create(args);
+      return aggregate(args);
     };
 
     const result = await createJob(
@@ -199,8 +166,52 @@ describe("jobs isolation", () => {
     );
 
     assert.equal(result.ok, true);
-    assert.equal(attempts, 2);
-    assert.equal(db.rows[0]?.position, 0);
+    assert.equal(reads, 2);
+    assert.deepEqual(
+      db.rows.map((row) => row.position).sort((left, right) => left - right),
+      [0, 1]
+    );
+  });
+
+  it("restores rows when a transaction writes and then throws", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a", title: "Keep me" })]);
+    await assert.rejects(
+      () =>
+        db.$transaction(async (tx) => {
+          await tx.job.create({
+            data: {
+              userId: "user-a",
+              company: "Beta",
+              title: "Temp",
+              url: null,
+              notes: null,
+              status: "applied",
+              position: 1,
+              appliedAt: now,
+            },
+          });
+          const listed = await tx.job.findMany({ where: { userId: "user-a" } });
+          assert.equal(listed.length, 2);
+          throw new Error("read failed");
+        }),
+      /read failed/
+    );
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0]?.title, "Keep me");
+
+    await Promise.race([
+      db.$transaction(async (tx) => {
+        await tx.job.updateMany({
+          where: { id: "a1", userId: "user-a" },
+          data: { title: "After" },
+        });
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("transaction lock was not released")), 500);
+      }),
+    ]);
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0]?.title, "After");
   });
 
   it("stops after repeated position conflicts", async () => {

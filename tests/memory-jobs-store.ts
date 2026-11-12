@@ -3,6 +3,26 @@ import type { JobRecord, JobsStore } from "../lib/jobs";
 export function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecord[] } {
   const rows = seed.map((row) => ({ ...row }));
   let transactionTail = Promise.resolve();
+
+  function positionTaken(
+    userId: string,
+    status: JobRecord["status"],
+    position: number,
+    exceptId?: string
+  ): boolean {
+    return rows.some(
+      (row) =>
+        row.id !== exceptId &&
+        row.userId === userId &&
+        row.status === status &&
+        row.position === position
+    );
+  }
+
+  function positionConflict(): Error {
+    return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+  }
+
   const store: JobsStore & { rows: JobRecord[] } = {
     rows,
     async $transaction(run) {
@@ -12,8 +32,17 @@ export function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: J
         release = resolve;
       });
       await previous;
+      const snapshot = rows.map((row) => ({
+        ...row,
+        appliedAt: new Date(row.appliedAt),
+        createdAt: new Date(row.createdAt),
+        updatedAt: new Date(row.updatedAt),
+      }));
       try {
         return await run({ job: store.job });
+      } catch (error) {
+        rows.splice(0, rows.length, ...snapshot);
+        throw error;
       } finally {
         release();
       }
@@ -30,7 +59,8 @@ export function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: J
             for (const key of keys) {
               const field = Object.keys(key)[0] as keyof JobRecord | undefined;
               if (!field) continue;
-              const dir = key[field] === "desc" ? -1 : 1;
+              const direction = (key as Record<string, "asc" | "desc" | undefined>)[field];
+              const dir = direction === "desc" ? -1 : 1;
               const left = a[field];
               const right = b[field];
               if (left == null && right != null) return -1 * dir;
@@ -66,6 +96,9 @@ export function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: J
           createdAt: now,
           updatedAt: now,
         };
+        if (positionTaken(row.userId, row.status, row.position)) {
+          throw positionConflict();
+        }
         rows.push(row);
         return { ...row };
       },
@@ -74,8 +107,14 @@ export function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: J
         if (index < 0) {
           throw new Error("not found");
         }
+        const current = rows[index];
+        const status = data.status ?? current.status;
+        const position = data.position ?? current.position;
+        if (positionTaken(current.userId, status, position, current.id)) {
+          throw positionConflict();
+        }
         rows[index] = {
-          ...rows[index],
+          ...current,
           ...data,
           updatedAt: new Date(),
         };
@@ -88,8 +127,14 @@ export function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: J
         if (index < 0) {
           return { count: 0 };
         }
+        const current = rows[index];
+        const status = data.status ?? current.status;
+        const position = data.position ?? current.position;
+        if (positionTaken(current.userId, status, position, current.id)) {
+          throw positionConflict();
+        }
         rows[index] = {
-          ...rows[index],
+          ...current,
           ...data,
           updatedAt: new Date(),
         };

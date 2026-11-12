@@ -31,6 +31,15 @@ function snapshotEnv(keys: string[]): () => void {
 
 const signedIn = { getSessionUserId: async () => "user-a" as string | null };
 
+function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
 function streamingJsonRequest(stream: ReadableStream<Uint8Array>): Request {
   const init: RequestInit & { duplex: "half" } = {
     method: "POST",
@@ -69,6 +78,35 @@ describe("readTailorJobDescription", () => {
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.jobDescription, "hello");
+    }
+  });
+
+  it("caps a multibyte body on UTF-8 bytes", async () => {
+    const jobDescription = "€😀";
+    const exact = Buffer.from(JSON.stringify({ jobDescription }));
+    const characters = JSON.stringify({ jobDescription }).length;
+    assert.ok(exact.byteLength > characters);
+    assert.ok(exact.byteLength - 1 >= characters);
+
+    const exactResult = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(exact)),
+      exact.byteLength
+    );
+    assert.equal(exactResult.ok, true);
+    if (exactResult.ok) {
+      assert.equal(exactResult.jobDescription, jobDescription);
+    }
+
+    const oneByteOver = Buffer.concat([exact, Buffer.from([0x20])]);
+    assert.equal(oneByteOver.byteLength, exact.byteLength + 1);
+    const overResult = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(oneByteOver)),
+      exact.byteLength
+    );
+    assert.equal(overResult.ok, false);
+    if (!overResult.ok) {
+      assert.equal(overResult.status, 413);
+      assert.equal(overResult.error, BODY_TOO_LARGE);
     }
   });
 

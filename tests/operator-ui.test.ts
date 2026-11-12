@@ -59,6 +59,7 @@ let KanbanBoard!: typeof import("../app/board/kanban-board").KanbanBoard;
 let LoginForm!: typeof import("../app/login/login-form").LoginForm;
 let RegisterForm!: typeof import("../app/register/register-form").RegisterForm;
 let TailorForm!: typeof import("../app/tailor-form").TailorForm;
+let SignOutButton!: typeof import("../app/sign-out-button").SignOutButton;
 
 before(async () => {
   const React = await import("react");
@@ -73,6 +74,7 @@ before(async () => {
   ({ LoginForm } = await import("../app/login/login-form"));
   ({ RegisterForm } = await import("../app/register/register-form"));
   ({ TailorForm } = await import("../app/tailor-form"));
+  ({ SignOutButton } = await import("../app/sign-out-button"));
 });
 
 after(() => {
@@ -543,22 +545,28 @@ describe("tailor form", { concurrency: 1 }, () => {
     resolve: (response: Response) => void;
   };
 
-  function holdFetches(): { calls: HeldFetch[]; restore: () => void } {
+  function holdFetches(options?: { rejectOnAbort?: boolean }): {
+    calls: HeldFetch[];
+    restore: () => void;
+  } {
     const calls: HeldFetch[] = [];
     const previous = globalThis.fetch;
+    const rejectOnAbort = options?.rejectOnAbort !== false;
     globalThis.fetch = ((_input: unknown, init?: RequestInit) => {
       const signal = init?.signal ?? null;
       return new Promise<Response>((resolve, reject) => {
-        const fail = () => {
-          const error = new Error("aborted");
-          error.name = "AbortError";
-          reject(error);
-        };
-        if (signal?.aborted) {
-          fail();
-          return;
+        if (rejectOnAbort) {
+          const fail = () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          if (signal?.aborted) {
+            fail();
+            return;
+          }
+          signal?.addEventListener("abort", fail, { once: true });
         }
-        signal?.addEventListener("abort", fail, { once: true });
         calls.push({ signal, resolve });
       });
     }) as typeof fetch;
@@ -629,6 +637,160 @@ describe("tailor form", { concurrency: 1 }, () => {
       assert.equal(reply.value, "Thanks");
     } finally {
       held.restore();
+      await view.cleanup();
+    }
+  });
+
+  it("keeps the latest tailor result when an older request settles late", async () => {
+    const held = holdFetches({ rejectOnAbort: false });
+    const view = await render(createElement(TailorForm));
+    try {
+      await submitJob(view.container, "Senior engineer");
+      const form = view.container.querySelector("form");
+      assert.ok(form instanceof HTMLFormElement);
+      await submitForm(form);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      assert.equal(held.calls.length, 2);
+
+      held.calls[0]?.resolve(Response.json({ cv: "T0xE", replyText: "Old reply" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      assert.equal(view.container.querySelector("[role=alert]"), null);
+      assert.equal(view.container.querySelector("a"), null);
+      assert.equal(view.container.querySelector("button")?.textContent, "Tailoring…");
+
+      held.calls[1]?.resolve(Response.json({ cv: "TkVX", replyText: "New reply" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const reply = view.container.querySelector("textarea[readonly]");
+      assert.ok(reply instanceof HTMLTextAreaElement);
+      assert.equal(reply.value, "New reply");
+      const href = view.container.querySelector("a")?.getAttribute("href") ?? "";
+      assert.match(href, /TkVX/);
+      assert.doesNotMatch(href, /T0xE/);
+      assert.equal(view.container.querySelector("[role=alert]"), null);
+    } finally {
+      held.restore();
+      await view.cleanup();
+    }
+
+    const errorHeld = holdFetches({ rejectOnAbort: false });
+    const errorView = await render(createElement(TailorForm));
+    try {
+      await submitJob(errorView.container, "Senior engineer");
+      const form = errorView.container.querySelector("form");
+      assert.ok(form instanceof HTMLFormElement);
+      await submitForm(form);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      errorHeld.calls[1]?.resolve(Response.json({ cv: "TkVX", replyText: "New reply" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      errorHeld.calls[0]?.resolve(
+        Response.json({ error: "Upstream failed" }, { status: 500 })
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const reply = errorView.container.querySelector("textarea[readonly]");
+      assert.ok(reply instanceof HTMLTextAreaElement);
+      assert.equal(reply.value, "New reply");
+      assert.equal(errorView.container.querySelector("[role=alert]"), null);
+      assert.equal(errorView.container.textContent?.includes("Upstream failed"), false);
+    } finally {
+      errorHeld.restore();
+      await errorView.cleanup();
+    }
+  });
+});
+
+describe("sign out", { concurrency: 1 }, () => {
+  it("redirects to login after a successful sign-out", async () => {
+    let release: (result: { error: null }) => void = () => undefined;
+    const pending = new Promise<{ error: null }>((resolve) => {
+      release = resolve;
+    });
+    const assigned: string[] = [];
+    const view = await render(
+      createElement(SignOutButton, {
+        signOut: () => pending,
+        goToLogin: () => {
+          assigned.push("/login");
+        },
+      })
+    );
+    try {
+      const button = view.container.querySelector("button");
+      assert.equal(button?.textContent, "Sign out");
+      await act(async () => {
+        button?.click();
+      });
+      assert.equal(view.container.querySelector("button")?.textContent, "Signing out…");
+      assert.equal(view.container.querySelector("button")?.disabled, true);
+      assert.deepEqual(assigned, []);
+      release({ error: null });
+      await act(async () => {
+        await pending;
+      });
+      assert.deepEqual(assigned, ["/login"]);
+      assert.equal(view.container.querySelector("[role=alert]"), null);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
+  it("shows an API error and does not redirect", async () => {
+    const assigned: string[] = [];
+    const view = await render(
+      createElement(SignOutButton, {
+        signOut: async () => ({ error: { message: "Session expired" } }),
+        goToLogin: () => {
+          assigned.push("/login");
+        },
+      })
+    );
+    try {
+      await act(async () => {
+        view.container.querySelector("button")?.click();
+      });
+      assert.equal(view.container.querySelector("[role=alert]")?.textContent, "Session expired");
+      assert.deepEqual(assigned, []);
+      assert.equal(view.container.querySelector("button")?.disabled, false);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
+  it("shows a generic error when sign-out throws and does not redirect", async () => {
+    const assigned: string[] = [];
+    const view = await render(
+      createElement(SignOutButton, {
+        signOut: async () => {
+          throw new Error("network down");
+        },
+        goToLogin: () => {
+          assigned.push("/login");
+        },
+      })
+    );
+    try {
+      await act(async () => {
+        view.container.querySelector("button")?.click();
+      });
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Sign out failed. Please try again."
+      );
+      assert.deepEqual(assigned, []);
+      assert.equal(view.container.querySelector("button")?.disabled, false);
+    } finally {
       await view.cleanup();
     }
   });

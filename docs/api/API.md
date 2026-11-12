@@ -192,7 +192,7 @@ curl -s -X POST http://localhost:3001/api/tailor-cv \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TAILOR_API_KEY" \
   -d '{"jobDescription": "Senior React engineer. Requirements: TypeScript, React, Node.js."}' \
-  | tee /tmp/tailor.json | jq -r '.cv' | base64 -d > /tmp/wayfare-mgr.docx
+  | tee /tmp/tailor.json | jq -r '.cv' | base64 -d > /tmp/tailored-cv.docx
 ```
 
 When calling from a JD file, save the decoded `.docx` as the JD basename (same convention as `npm run smoke`, which writes `tmp/smoke/<jd-slug>.docx` and `tmp/smoke/<jd-slug>.curated.json`).
