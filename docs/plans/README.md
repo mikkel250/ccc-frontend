@@ -22,6 +22,14 @@ Plan: [Kanban job tracker](./2026-09-06-002-feat-kanban-job-tracker-plan.md)
 | M3 | Gantt / timeline of applications | not started | needs plan | Date-aware view of the same jobs | parked |
 | M4 | Automated nudges / follow-ups | not started | needs plan | Reminders without a new tracker | parked |
 
+## Follow-up plans
+
+These sit outside the milestone table. Drain skips them.
+
+| Plan | When |
+| --- | --- |
+| [Tailor hardening test gaps](./2026-11-10-1737-test-tailor-hardening-test-gaps-plan.md) | After the tailor hardening pull request merges |
+
 ## How to update
 
 - Drain-style: one `/lfg` per `lfg` row. Next after M2 is **not** M3 until Kanban ships and is unparked.
