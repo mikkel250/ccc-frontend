@@ -4,6 +4,7 @@ import {
   clientSafeError,
   JD_MAX_CHARS,
   resolveCccFetchTimeoutMs,
+  resolveCccRetryAfterSeconds,
   tailorOnDemand,
 } from "../app/api/lib/ccc-tailor";
 import { handleTailorPost } from "../app/api/lib/tailor-post";
@@ -591,8 +592,36 @@ describe("tailorOnDemand", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.status, 429);
-      assert.equal(result.retryAfterSeconds, 30);
+      assert.ok(result.retryAfterSeconds === 29 || result.retryAfterSeconds === 30);
     }
+  });
+});
+
+describe("resolveCccRetryAfterSeconds", () => {
+  const now = 1_700_000_000_000;
+
+  it("returns an exact delay for a numeric Retry-After", () => {
+    const response = new Response(null, {
+      status: 429,
+      headers: { "Retry-After": "45" },
+    });
+    assert.equal(resolveCccRetryAfterSeconds(response, {}, now), 45);
+  });
+
+  it("converts an HTTP-date Retry-After into remaining seconds when resetTime is absent", () => {
+    const response = new Response(null, {
+      status: 429,
+      headers: { "Retry-After": new Date(now + 45_000).toUTCString() },
+    });
+    assert.equal(resolveCccRetryAfterSeconds(response, {}, now), 45);
+  });
+
+  it("returns an exact delay from resetTime for a fixed now", () => {
+    const response = new Response(null, { status: 429 });
+    assert.equal(
+      resolveCccRetryAfterSeconds(response, { resetTime: now + 30_000 }, now),
+      30
+    );
   });
 });
 

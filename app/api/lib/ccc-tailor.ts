@@ -92,6 +92,22 @@ function isTimeoutOrAbortError(error: unknown): boolean {
   return error.name === "TimeoutError" || error.name === "AbortError";
 }
 
+function retryAfterHeaderSeconds(header: string, now: number): number | undefined {
+  const trimmed = header.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const delaySeconds = Number(trimmed);
+    if (Number.isFinite(delaySeconds) && delaySeconds >= 1) {
+      return delaySeconds;
+    }
+    return undefined;
+  }
+  const dateMs = Date.parse(trimmed);
+  if (!Number.isFinite(dateMs)) {
+    return undefined;
+  }
+  return Math.max(1, Math.ceil((dateMs - now) / 1000));
+}
+
 export function resolveCccRetryAfterSeconds(
   response: Response,
   record: Record<string, unknown>,
@@ -102,8 +118,8 @@ export function resolveCccRetryAfterSeconds(
   }
   const header = response.headers.get("Retry-After");
   if (header != null) {
-    const delaySeconds = Number.parseInt(header, 10);
-    if (Number.isFinite(delaySeconds) && delaySeconds >= 1) {
+    const delaySeconds = retryAfterHeaderSeconds(header, now);
+    if (delaySeconds != null) {
       return delaySeconds;
     }
   }
