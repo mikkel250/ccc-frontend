@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import {
   createJob,
@@ -9,6 +9,48 @@ import {
   type JobRecord,
 } from "../lib/jobs";
 import { createMemoryStore } from "./memory-jobs-store";
+
+function isPositionConflict(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code: unknown }).code === "P2002"
+  );
+}
+
+function countPositionConflicts(
+  db: ReturnType<typeof createMemoryStore>,
+  method: "create" | "updateMany"
+): { count: number } {
+  const seen = { count: 0 };
+  if (method === "create") {
+    const original = db.job.create.bind(db.job);
+    db.job.create = async (args) => {
+      try {
+        return await original(args);
+      } catch (error) {
+        if (isPositionConflict(error)) {
+          seen.count += 1;
+        }
+        throw error;
+      }
+    };
+    return seen;
+  }
+  const original = db.job.updateMany.bind(db.job);
+  db.job.updateMany = async (args) => {
+    try {
+      return await original(args);
+    } catch (error) {
+      if (isPositionConflict(error)) {
+        seen.count += 1;
+      }
+      throw error;
+    }
+  };
+  return seen;
+}
 
 function allowOverlappingPositionConflicts(db: ReturnType<typeof createMemoryStore>): void {
   const aggregate = db.job.aggregate.bind(db.job);
@@ -130,12 +172,20 @@ describe("jobs isolation", () => {
 
   it("keeps positions unique and ordered during concurrent creates", async () => {
     const db = createMemoryStore();
-    const results = await Promise.all([
-      createJob("user-a", { company: "Alpha", title: "Engineer" }, { db }),
-      createJob("user-a", { company: "Beta", title: "Designer" }, { db }),
+    allowOverlappingPositionConflicts(db);
+    const conflicts = countPositionConflicts(db, "create");
+    const results = await Promise.race([
+      Promise.all([
+        createJob("user-a", { company: "Alpha", title: "Engineer" }, { db }),
+        createJob("user-a", { company: "Beta", title: "Designer" }, { db }),
+      ]),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("overlapping creates did not finish")), 1000);
+      }),
     ]);
 
     assert.equal(results.every((result) => result.ok), true);
+    assert.notEqual(conflicts.count, 0);
     assert.deepEqual(
       db.rows
         .filter((job) => job.userId === "user-a" && job.status === "applied")
@@ -497,13 +547,23 @@ describe("jobs isolation", () => {
   });
 
   it("defaults omitted appliedAt to the local calendar date at UTC midnight", async () => {
-    const db = createMemoryStore();
-    const created = await createJob("user-a", { company: "Acme", title: "Eng" }, { db });
-    assert.equal(created.ok, true);
-    if (created.ok) {
-      const local = new Date();
-      const expected = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}T00:00:00.000Z`;
-      assert.equal(created.job.appliedAt.toISOString(), expected);
+    const previousTz = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-15T07:30:00.000Z") });
+    try {
+      const db = createMemoryStore();
+      const created = await createJob("user-a", { company: "Acme", title: "Eng" }, { db });
+      assert.equal(created.ok, true);
+      if (created.ok) {
+        assert.equal(created.job.appliedAt.toISOString(), "2026-01-14T00:00:00.000Z");
+      }
+    } finally {
+      mock.timers.reset();
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
     }
   });
 
@@ -576,52 +636,8 @@ describe("jobs isolation", () => {
       seedJob({ id: "a2", userId: "user-a", status: "applied", position: 1 }),
       seedJob({ id: "i1", userId: "user-a", status: "interview", position: 0 }),
     ]);
-
-    const results = await Promise.all([
-      updateJob("user-a", "a1", { status: "interview" }, { db }),
-      updateJob("user-a", "a2", { status: "interview" }, { db }),
-    ]);
-
-    assert.equal(results.every((result) => result.ok), true);
-    assert.deepEqual(
-      db.rows
-        .filter((job) => job.userId === "user-a" && job.status === "interview")
-        .sort((left, right) => left.position - right.position)
-        .map((job) => job.position),
-      [0, 1, 2]
-    );
-  });
-
-  it("retries overlapping creates when the store reports a position conflict", async () => {
-    const db = createMemoryStore();
     allowOverlappingPositionConflicts(db);
-    const results = await Promise.race([
-      Promise.all([
-        createJob("user-a", { company: "Alpha", title: "Engineer" }, { db }),
-        createJob("user-a", { company: "Beta", title: "Designer" }, { db }),
-      ]),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("overlapping creates did not finish")), 1000);
-      }),
-    ]);
-
-    assert.equal(results.every((result) => result.ok), true);
-    assert.deepEqual(
-      db.rows
-        .filter((job) => job.userId === "user-a" && job.status === "applied")
-        .sort((left, right) => left.position - right.position)
-        .map((job) => job.position),
-      [0, 1]
-    );
-  });
-
-  it("retries overlapping column moves when the store reports a position conflict", async () => {
-    const db = createMemoryStore([
-      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
-      seedJob({ id: "a2", userId: "user-a", status: "applied", position: 1 }),
-      seedJob({ id: "i1", userId: "user-a", status: "interview", position: 0 }),
-    ]);
-    allowOverlappingPositionConflicts(db);
+    const conflicts = countPositionConflicts(db, "updateMany");
     const results = await Promise.race([
       Promise.all([
         updateJob("user-a", "a1", { status: "interview" }, { db }),
@@ -633,6 +649,7 @@ describe("jobs isolation", () => {
     ]);
 
     assert.equal(results.every((result) => result.ok), true);
+    assert.notEqual(conflicts.count, 0);
     assert.deepEqual(
       db.rows
         .filter((job) => job.userId === "user-a" && job.status === "interview")
