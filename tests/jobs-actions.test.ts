@@ -1,10 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createJobAction, moveJobAction, updateJobAction } from "../app/actions/jobs";
+import { runJobAction } from "../lib/job-actions";
 import type { JobRecord, JobStatus } from "../lib/jobs";
+import {
+  consumeRateLimit,
+  createMemoryStore as createRateLimitStore,
+  jobsRateLimitConfig,
+} from "../lib/rate-limit";
 import { createMemoryStore } from "./memory-jobs-store";
 
 const now = new Date("2026-09-01T12:00:00.000Z");
+const tight = { max: 1, windowMs: 60_000 };
 
 function seedJob(overrides: Partial<JobRecord> & Pick<JobRecord, "id" | "userId">): JobRecord {
   return {
@@ -101,5 +108,114 @@ describe("job action form data", () => {
     const rejected = await moveJobAction("a1", "wishlist" as JobStatus, depsFor(db));
     assert.deepEqual(rejected, { error: "Choose a valid column." });
     assert.equal(db.rows[0]?.status, "interview");
+  });
+});
+
+describe("runJobAction rate limit", () => {
+  it("returns an error without running the DAL when the jobs bucket is exhausted", async () => {
+    const store = createRateLimitStore();
+    const consume = (key: string) => consumeRateLimit(key, tight, { store });
+    let ran = 0;
+    const first = await runJobAction(
+      async () => {
+        ran += 1;
+        return { ok: true };
+      },
+      {
+        requireUserId: async () => "user-a",
+        consume,
+        revalidate: () => {},
+      }
+    );
+    assert.equal(first, undefined);
+    const second = await runJobAction(
+      async () => {
+        ran += 1;
+        return { ok: true };
+      },
+      {
+        requireUserId: async () => "user-a",
+        consume,
+        revalidate: () => {},
+      }
+    );
+    assert.deepEqual(second, {
+      error: "Too many requests. Please wait before trying again.",
+    });
+    assert.equal(ran, 1);
+  });
+
+  it("does not share a jobs bucket across session user ids", async () => {
+    const store = createRateLimitStore();
+    const consume = (key: string) => consumeRateLimit(key, tight, { store });
+    const depsForUser = (userId: string) => ({
+      requireUserId: async () => userId,
+      consume,
+      revalidate: () => {},
+    });
+    await runJobAction(async () => ({ ok: true }), depsForUser("user-a"));
+    const blocked = await runJobAction(async () => ({ ok: true }), depsForUser("user-a"));
+    const other = await runJobAction(async () => ({ ok: true }), depsForUser("user-b"));
+    assert.deepEqual(blocked, {
+      error: "Too many requests. Please wait before trying again.",
+    });
+    assert.equal(other, undefined);
+  });
+
+  it("does not consume when the session lookup redirects", async () => {
+    let consumed = 0;
+    await assert.rejects(
+      () =>
+        runJobAction(
+          async () => {
+            throw new Error("should not run");
+          },
+          {
+            requireUserId: async () => {
+              throw new Error("redirect");
+            },
+            consume: () => {
+              consumed += 1;
+              return { ok: true };
+            },
+            revalidate: () => {},
+          }
+        ),
+      /redirect/
+    );
+    assert.equal(consumed, 0);
+  });
+
+  it("uses JOB_RATE_LIMIT_MAX and the jobs: prefix when consume is not injected", async () => {
+    const previousJobsMax = process.env.JOB_RATE_LIMIT_MAX;
+    const previousTailorMax = process.env.RATE_LIMIT_MAX;
+    const userId = `jobs-default-${process.hrtime.bigint()}`;
+    const deps = {
+      requireUserId: async () => userId,
+      revalidate: () => {},
+    };
+    try {
+      process.env.JOB_RATE_LIMIT_MAX = "1";
+      process.env.RATE_LIMIT_MAX = "100";
+      const first = await runJobAction(async () => ({ ok: true }), deps);
+      assert.equal(first, undefined);
+      const second = await runJobAction(async () => ({ ok: true }), deps);
+      assert.deepEqual(second, {
+        error: "Too many requests. Please wait before trying again.",
+      });
+      const prefixHit = consumeRateLimit(`jobs:${userId}`, jobsRateLimitConfig());
+      assert.equal(prefixHit.ok, false);
+    } finally {
+      if (previousJobsMax === undefined) {
+        delete process.env.JOB_RATE_LIMIT_MAX;
+      } else {
+        process.env.JOB_RATE_LIMIT_MAX = previousJobsMax;
+      }
+      if (previousTailorMax === undefined) {
+        delete process.env.RATE_LIMIT_MAX;
+      } else {
+        process.env.RATE_LIMIT_MAX = previousTailorMax;
+      }
+    }
   });
 });

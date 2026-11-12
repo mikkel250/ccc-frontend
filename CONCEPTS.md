@@ -12,6 +12,9 @@ The sync front in this repo: operator pastes a job description, this app’s ser
 ### Bearer presenter
 A server-side caller that attaches `Authorization: Bearer <TAILOR_API_KEY>` to CCC. Seekers and browsers never hold the key. In this repo: `app/api/tailor` → `tailorOnDemand`.
 
+### Session-keyed rate limit
+Best-effort BFF ceiling on authenticated mutating work (on-demand tailor, job mutations), keyed by the Better Auth session user id rather than client IP. The default store is an in-memory map local to the process, so it is not a durable account-wide cap. Pre-auth sign-in/sign-up may use a separate fallback that does not trust client forwarding headers. Distinct from CCC’s own IP and shared-secret buckets.
+
 ### CCC API URL
 Base URL for the companion tailor service (`CCC_API_URL`). Local default: CCC on port **3001** while this app uses **3000**.
 

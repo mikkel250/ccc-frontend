@@ -18,5 +18,16 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
   },
+  rateLimit: {
+    customRules: {
+      "/sign-in/email": { window: 10, max: 100 },
+      "/sign-up/email": { window: 10, max: 100 },
+    },
+  },
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: [],
+    },
+  },
   plugins: [firstOperatorRegistration(), nextCookies()],
 });

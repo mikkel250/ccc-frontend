@@ -29,7 +29,10 @@ function snapshotEnv(keys: string[]): () => void {
   };
 }
 
-const signedIn = { getSessionUserId: async () => "user-a" as string | null };
+const signedIn = {
+  getSessionUserId: async () => "user-a" as string | null,
+  consume: () => ({ ok: true as const }),
+};
 
 function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -253,8 +256,39 @@ describe("POST /api/tailor", () => {
     assert.equal(body.error, INVALID_JSON);
   });
 
+  it("returns 400 for non-object JSON without consuming the rate limit or calling CCC", async () => {
+    for (const raw of ["null", "[]", "123"]) {
+      let consumed = 0;
+      let called = false;
+      const response = await handleTailorPost(
+        new Request("http://127.0.0.1/api/tailor", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: raw,
+        }),
+        {
+          ...signedIn,
+          consume: () => {
+            consumed += 1;
+            return { ok: true as const };
+          },
+          tailor: async () => {
+            called = true;
+            return { ok: true, cv: "UEsDbA==", replyText: null };
+          },
+        }
+      );
+      assert.equal(response.status, 400, raw);
+      const body = (await response.json()) as { error?: string };
+      assert.equal(body.error, "Job description is required.");
+      assert.notEqual(body.error, INVALID_JSON);
+      assert.equal(consumed, 0, raw);
+      assert.equal(called, false, raw);
+    }
+  });
+
   it("ignores non-string jobDescription values", async () => {
-    let seenJd = "unset";
+    let called = false;
     const response = await handleTailorPost(
       new Request("http://127.0.0.1/api/tailor", {
         method: "POST",
@@ -263,13 +297,13 @@ describe("POST /api/tailor", () => {
       }),
       {
         ...signedIn,
-        tailor: async (jobDescription) => {
-          seenJd = jobDescription;
+        tailor: async () => {
+          called = true;
           return { ok: false, status: 400, error: "Job description is required." };
         },
       }
     );
-    assert.equal(seenJd, "");
+    assert.equal(called, false);
     assert.equal(response.status, 400);
   });
 

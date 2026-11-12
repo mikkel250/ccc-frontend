@@ -81,6 +81,10 @@ export function firstOperatorRegistration(deps: {
                     });
                   }
 
+                  // Email signup runs this hook inside Better Auth's transaction.
+                  // The singleton id is inserted before the user row so a second
+                  // concurrent signup loses on the primary key, and a later
+                  // failure rolls the claim back with the user.
                   try {
                     await adapter.create({
                       model: "registrationClaim",
