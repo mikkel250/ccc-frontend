@@ -380,9 +380,10 @@ describe("POST /api/tailor", () => {
     assert.equal(/secret|key|bearer/i.test(body.error ?? ""), false);
   });
 
-  it("forwards TRUSTED_CCC_CLIENT_IP and ignores inbound proxy headers", async () => {
-    const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY", "VERCEL"]);
+  it("forwards the Vercel platform IP and ignores inbound x-forwarded-for", async () => {
+    const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY", "VERCEL", "CCC_TRUSTED_PROXY"]);
     process.env.VERCEL = "1";
+    delete process.env.CCC_TRUSTED_PROXY;
     process.env.CCC_API_URL = "http://ccc.test";
     process.env.TAILOR_API_KEY = "secret-key-value";
     const originalFetch = globalThis.fetch;
@@ -406,8 +407,40 @@ describe("POST /api/tailor", () => {
         signedIn
       );
       assert.equal(response.status, 200);
+      assert.equal(forwarded, "192.0.2.40");
+    } finally {
+      globalThis.fetch = originalFetch;
+      restore();
+    }
+  });
+
+  it("sends loopback when the proxy topology is not trusted", async () => {
+    const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY", "VERCEL", "CCC_TRUSTED_PROXY"]);
+    delete process.env.VERCEL;
+    delete process.env.CCC_TRUSTED_PROXY;
+    process.env.CCC_API_URL = "http://ccc.test";
+    process.env.TAILOR_API_KEY = "secret-key-value";
+    const originalFetch = globalThis.fetch;
+    let forwarded: string | null = null;
+    globalThis.fetch = (async (_input, init) => {
+      forwarded = new Headers(init?.headers).get("x-forwarded-for");
+      return Response.json({ cv: "UEsDbA==", replyText: null });
+    }) as typeof fetch;
+    try {
+      const response = await handleTailorPost(
+        new Request("http://127.0.0.1/api/tailor", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": "203.0.113.10",
+            "x-vercel-forwarded-for": "192.0.2.40",
+          },
+          body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+        }),
+        signedIn
+      );
+      assert.equal(response.status, 200);
       assert.equal(forwarded, TRUSTED_CCC_CLIENT_IP);
-      assert.equal(forwarded, "127.0.0.1");
     } finally {
       globalThis.fetch = originalFetch;
       restore();

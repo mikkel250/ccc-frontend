@@ -26,6 +26,7 @@ export type TailorDeps = {
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
   timeoutMs?: number | undefined;
+  clientIp?: string | undefined;
 };
 
 const SAFE_CCC_ERRORS = new Set([
@@ -120,7 +121,7 @@ export async function tailorOnDemand(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
-        "x-forwarded-for": TRUSTED_CCC_CLIENT_IP,
+        "x-forwarded-for": deps.clientIp?.trim() || TRUSTED_CCC_CLIENT_IP,
       },
       body: JSON.stringify({
         jobDescription: jd,
