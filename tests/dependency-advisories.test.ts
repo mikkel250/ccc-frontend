@@ -87,6 +87,11 @@ describe("Dependabot", () => {
     assert.match(config, /package-ecosystem:\s*npm/);
     assert.match(config, /directory:\s*"\/"/);
     assert.match(config, /interval:\s*weekly/);
+    assert.match(config, /dependency-name:\s*"\*"/);
+    assert.match(config, /update-types:\s*\["version-update:semver-major"\]/);
+    assert.match(config, /dependency-name:\s*"better-auth"/);
+    assert.match(config, /versions:\s*\[">=1\.8\.0-0"\]/);
+    assert.match(config, /dependency-name:\s*"@better-auth\/memory-adapter"/);
   });
 });
 
