@@ -87,6 +87,7 @@ export function TailorForm() {
   const [cv, setCv] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const attemptRef = useRef(0);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -107,10 +108,13 @@ export function TailorForm() {
       return;
     }
 
+    // Advance first so only this attempt may update the form.
+    const attempt = ++attemptRef.current;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const timeoutId = window.setTimeout(() => controller.abort(), CLIENT_FETCH_TIMEOUT_MS);
+    const stillCurrent = () => mountedRef.current && attemptRef.current === attempt;
 
     setPending(true);
     setError(null);
@@ -124,8 +128,11 @@ export function TailorForm() {
         signal: controller.signal,
       });
       const body = await readTailorResponse(response);
+      if (!stillCurrent()) {
+        return;
+      }
       const outcome = settleTailorAttempt({
-        mounted: mountedRef.current,
+        mounted: true,
         response: { ok: response.ok, status: response.status, body },
       });
       if (outcome.type === "message") {
@@ -135,13 +142,16 @@ export function TailorForm() {
         setReplyText(outcome.replyText);
       }
     } catch (caught) {
-      const outcome = settleTailorAttempt({ mounted: mountedRef.current, error: caught });
+      if (!stillCurrent()) {
+        return;
+      }
+      const outcome = settleTailorAttempt({ mounted: true, error: caught });
       if (outcome.type === "message") {
         setError(outcome.message);
       }
     } finally {
       window.clearTimeout(timeoutId);
-      if (mountedRef.current) {
+      if (stillCurrent()) {
         setPending(false);
       }
     }

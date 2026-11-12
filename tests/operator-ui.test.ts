@@ -4,6 +4,7 @@ import { Window } from "happy-dom";
 import type { ReactElement, ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import type { BoardJob, JobStatus } from "../lib/jobs";
+import { TIMEOUT_ERROR } from "../app/lib/tailor-constants";
 
 const dom = new Window({ url: "http://127.0.0.1:3000/" });
 const domGlobals = [
@@ -57,6 +58,7 @@ let AppRouterContext!: typeof import("next/dist/shared/lib/app-router-context.sh
 let KanbanBoard!: typeof import("../app/board/kanban-board").KanbanBoard;
 let LoginForm!: typeof import("../app/login/login-form").LoginForm;
 let RegisterForm!: typeof import("../app/register/register-form").RegisterForm;
+let TailorForm!: typeof import("../app/tailor-form").TailorForm;
 
 before(async () => {
   const React = await import("react");
@@ -70,6 +72,7 @@ before(async () => {
   ({ KanbanBoard } = await import("../app/board/kanban-board"));
   ({ LoginForm } = await import("../app/login/login-form"));
   ({ RegisterForm } = await import("../app/register/register-form"));
+  ({ TailorForm } = await import("../app/tailor-form"));
 });
 
 after(() => {
@@ -529,6 +532,103 @@ describe("kanban board", { concurrency: 1 }, () => {
         "Could not save. Please try again."
       );
     } finally {
+      await view.cleanup();
+    }
+  });
+});
+
+describe("tailor form", { concurrency: 1 }, () => {
+  type HeldFetch = {
+    signal: AbortSignal | null;
+    resolve: (response: Response) => void;
+  };
+
+  function holdFetches(): { calls: HeldFetch[]; restore: () => void } {
+    const calls: HeldFetch[] = [];
+    const previous = globalThis.fetch;
+    globalThis.fetch = ((_input: unknown, init?: RequestInit) => {
+      const signal = init?.signal ?? null;
+      return new Promise<Response>((resolve, reject) => {
+        const fail = () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        };
+        if (signal?.aborted) {
+          fail();
+          return;
+        }
+        signal?.addEventListener("abort", fail, { once: true });
+        calls.push({ signal, resolve });
+      });
+    }) as typeof fetch;
+    return {
+      calls,
+      restore() {
+        globalThis.fetch = previous;
+      },
+    };
+  }
+
+  async function submitJob(container: ParentNode, description: string) {
+    const field = container.querySelector("textarea");
+    assert.ok(field instanceof HTMLTextAreaElement);
+    const form = container.querySelector("form");
+    assert.ok(form instanceof HTMLFormElement);
+    await act(async () => {
+      typeInto(field, description);
+    });
+    await submitForm(form);
+  }
+
+  it("aborts an in-flight tailor request on unmount without rendering an error", async () => {
+    const held = holdFetches();
+    const view = await render(createElement(TailorForm));
+    try {
+      await submitJob(view.container, "Senior engineer");
+      assert.equal(view.container.querySelector("button")?.textContent, "Tailoring…");
+      assert.equal(held.calls.length, 1);
+      assert.equal(held.calls[0]?.signal?.aborted, false);
+      await view.cleanup();
+      assert.equal(held.calls[0]?.signal?.aborted, true);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      assert.equal(document.body.textContent?.includes(TIMEOUT_ERROR), false);
+      assert.equal(document.querySelector("[role=alert]"), null);
+    } finally {
+      held.restore();
+    }
+  });
+
+  it("cancels the previous tailor request when another is submitted", async () => {
+    const held = holdFetches();
+    const view = await render(createElement(TailorForm));
+    try {
+      await submitJob(view.container, "Senior engineer");
+      const form = view.container.querySelector("form");
+      assert.ok(form instanceof HTMLFormElement);
+      await submitForm(form);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      assert.equal(held.calls.length, 2);
+      assert.equal(held.calls[0]?.signal?.aborted, true);
+      assert.equal(held.calls[1]?.signal?.aborted, false);
+      assert.equal(view.container.querySelector("[role=alert]"), null);
+      assert.equal(view.container.querySelector("button")?.textContent, "Tailoring…");
+
+      held.calls[1]?.resolve(Response.json({ cv: "UEsDbA==", replyText: "Thanks" }));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      assert.equal(view.container.querySelector("[role=alert]"), null);
+      assert.match(view.container.textContent ?? "", /Download tailored CV/);
+      const reply = view.container.querySelector("textarea[readonly]");
+      assert.ok(reply instanceof HTMLTextAreaElement);
+      assert.equal(reply.value, "Thanks");
+    } finally {
+      held.restore();
       await view.cleanup();
     }
   });

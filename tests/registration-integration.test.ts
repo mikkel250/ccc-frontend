@@ -423,4 +423,52 @@ describe("first-operator registration", () => {
     assert.equal(database.user.length, 1);
     assert.equal(database.registrationClaim.length, 1);
   });
+
+  it("allows further signups when public registration is enabled", async () => {
+    const database: MemoryDB = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      registrationClaim: [],
+    };
+    const existing = betterAuth({
+      secret: "test-secret-at-least-32-characters-long",
+      baseURL: "http://localhost:3000",
+      database: memoryAdapter(database),
+      emailAndPassword: { enabled: true, minPasswordLength: 8 },
+    });
+    await existing.api.signUpEmail({
+      body: {
+        name: "First",
+        email: "first@example.com",
+        password: "test-password",
+      },
+    });
+    assert.equal(database.user.length, 1);
+    assert.equal(database.registrationClaim.length, 0);
+
+    const open = betterAuth({
+      secret: "test-secret-at-least-32-characters-long",
+      baseURL: "http://localhost:3000",
+      database: memoryAdapter(database),
+      emailAndPassword: { enabled: true, minPasswordLength: 8 },
+      plugins: [firstOperatorRegistration({ allowRegistration: "true" })],
+    });
+    const signup = (email: string) =>
+      open.api.signUpEmail({
+        body: {
+          name: "Operator",
+          email,
+          password: "test-password",
+        },
+      });
+
+    const second = await signup("second@example.com");
+    const third = await signup("third@example.com");
+    assert.equal(second.user.email, "second@example.com");
+    assert.equal(third.user.email, "third@example.com");
+    assert.equal(database.user.length, 3);
+    assert.equal(database.registrationClaim.length, 0);
+  });
 });
