@@ -83,7 +83,7 @@ export function KanbanBoard({
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">
           URL
-          <input name="url" type="url" disabled={pending} className={inputClass} placeholder="https://" />
+          <input name="url" type="url" disabled={pending} className={inputClass} placeholder="https://example.com/job" />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium">
           Applied date
@@ -192,7 +192,7 @@ export function KanbanBoard({
                       >
                         <input name="company" defaultValue={job.company} required maxLength={200} disabled={pending} className={inputClass} />
                         <input name="title" defaultValue={job.title} required maxLength={200} disabled={pending} className={inputClass} />
-                        <input name="url" type="url" defaultValue={job.url ?? ""} disabled={pending} className={inputClass} />
+                        <input name="url" type="url" defaultValue={job.url ?? ""} disabled={pending} className={inputClass} placeholder="https://example.com/job" />
                         <input name="appliedAt" type="date" defaultValue={job.appliedAt} disabled={pending} className={inputClass} />
                         <textarea name="notes" rows={3} defaultValue={job.notes ?? ""} maxLength={4000} disabled={pending} className={inputClass} />
                         <button
