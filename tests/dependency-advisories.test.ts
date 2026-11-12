@@ -47,6 +47,12 @@ describe("patched advisory floors", () => {
   it("pins next and eslint-config-next to a patched 15.5 release", () => {
     const next = pkg.dependencies?.next ?? "";
     const eslintConfigNext = pkg.devDependencies?.["eslint-config-next"] ?? "";
+    assert.match(next, /^\d+\.\d+\.\d+$/, `next ${next} must be an exact 15.5.x pin`);
+    assert.match(
+      eslintConfigNext,
+      /^\d+\.\d+\.\d+$/,
+      `eslint-config-next ${eslintConfigNext} must be an exact 15.5.x pin`
+    );
     assert.equal(
       sameMinorAtLeast(next, 15, 5, 29),
       true,
@@ -62,15 +68,25 @@ describe("patched advisory floors", () => {
   it("pins better-auth packages to a patched 1.7 release", () => {
     const betterAuth = pkg.dependencies?.["better-auth"] ?? "";
     const memoryAdapter = pkg.devDependencies?.["@better-auth/memory-adapter"] ?? "";
-    assert.equal(
-      sameMinorAtLeast(betterAuth, 1, 7, 21),
-      true,
-      `better-auth ${betterAuth} must be 1.7.21 or a later 1.7.x`
+    assert.match(
+      betterAuth,
+      /^\d+\.\d+\.\d+$/,
+      `better-auth ${betterAuth} must be an exact 1.7.x pin`
+    );
+    assert.match(
+      memoryAdapter,
+      /^\d+\.\d+\.\d+$/,
+      `@better-auth/memory-adapter ${memoryAdapter} must be an exact 1.7.x pin`
     );
     assert.equal(
-      sameMinorAtLeast(memoryAdapter, 1, 7, 21),
+      sameMinorAtLeast(betterAuth, 1, 7, 22),
       true,
-      `@better-auth/memory-adapter ${memoryAdapter} must be 1.7.21 or a later 1.7.x`
+      `better-auth ${betterAuth} must be 1.7.22 or a later 1.7.x`
+    );
+    assert.equal(
+      sameMinorAtLeast(memoryAdapter, 1, 7, 22),
+      true,
+      `@better-auth/memory-adapter ${memoryAdapter} must be 1.7.22 or a later 1.7.x`
     );
   });
 
