@@ -114,7 +114,7 @@ describe("board authentication", () => {
     await assert.rejects(
       () =>
         renderBoard({
-          requireUserId: () => requireSessionUserId(async () => forged?.user.id ?? null),
+          requireUserId: () => requireSessionUserId(async () => null),
           list: async () => {
             listed = true;
             return { ok: true, jobs: [] };

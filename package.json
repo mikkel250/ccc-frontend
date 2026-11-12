@@ -15,22 +15,22 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
-    "better-auth": "^1.7.3",
-    "next": "15.5.25",
+    "better-auth": "1.7.21",
+    "next": "15.5.29",
     "prisma": "^6.19.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@better-auth/memory-adapter": "^1.7.3",
+    "@better-auth/memory-adapter": "1.7.21",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.25",
+    "eslint-config-next": "15.5.29",
     "happy-dom": "^21.0.4",
     "tailwindcss": "^4",
     "tsx": "^4.19.0",

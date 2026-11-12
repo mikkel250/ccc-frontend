@@ -69,7 +69,7 @@ function databaseWithUniqueClaim(database: MemoryDB) {
       try {
         const result = await transaction(async (trx) => {
           const create = trx.create.bind(trx);
-          const claimAware = trx as {
+          const claimAware = trx as unknown as {
             create: (input: { model: string; data?: { id?: unknown } }) => Promise<unknown>;
           };
           claimAware.create = async (input) => {
@@ -197,13 +197,13 @@ describe("first-operator registration", () => {
     const auth = betterAuth({
       secret: "test-secret-at-least-32-characters-long",
       baseURL: "http://localhost:3000",
-      database: (options) => {
+      database: (options: Parameters<typeof createAdapter>[0]) => {
         const adapter = createAdapter(options);
         const transaction = adapter.transaction.bind(adapter);
         adapter.transaction = (async (callback) => {
           return transaction(async (trx) => {
             const create = trx.create.bind(trx);
-            const claimAware = trx as {
+            const claimAware = trx as unknown as {
               create: (input: { model: string }) => Promise<unknown>;
             };
             claimAware.create = async (input) => {
