@@ -402,6 +402,87 @@ describe("jobs isolation", () => {
     assert.equal(db.rows[0]?.status, "interview");
     assert.equal(db.rows[0]?.position, 0);
   });
+
+  it("rejects an invalid applied date string", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", appliedAt: "not-a-date" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the applied date.");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects whitespace-only company and title", async () => {
+    const db = createMemoryStore();
+    const company = await createJob("user-a", { company: "   ", title: "Eng" }, { db });
+    const title = await createJob("user-a", { company: "Acme", title: " \t " }, { db });
+    assert.equal(company.ok, false);
+    assert.equal(title.ok, false);
+    if (!company.ok) {
+      assert.equal(company.error, "Check the company, title, URL, and notes.");
+    }
+    if (!title.ok) {
+      assert.equal(title.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects notes longer than 4000 characters", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", notes: "n".repeat(4001) },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects invalid company, title, status, notes, and date updates", async () => {
+    const original = seedJob({
+      id: "a1",
+      userId: "user-a",
+      company: "Acme",
+      title: "Keep me",
+    });
+    const cases: Array<{
+      input: Parameters<typeof updateJob>[2];
+      error: string;
+    }> = [
+      { input: { company: "   " }, error: "Check the company, title, URL, and notes." },
+      { input: { title: " \t " }, error: "Check the company, title, URL, and notes." },
+      { input: { status: "wishlist" }, error: "Choose a valid column." },
+      {
+        input: { notes: "n".repeat(4001) },
+        error: "Check the company, title, URL, and notes.",
+      },
+      { input: { appliedAt: "not-a-date" }, error: "Check the applied date." },
+    ];
+
+    for (const item of cases) {
+      const db = createMemoryStore([{ ...original }]);
+      const result = await updateJob("user-a", "a1", item.input, { db });
+      assert.equal(result.ok, false, JSON.stringify(item.input));
+      if (!result.ok) {
+        assert.equal(result.error, item.error, JSON.stringify(item.input));
+      }
+      assert.equal(db.rows[0]?.company, "Acme");
+      assert.equal(db.rows[0]?.title, "Keep me");
+      assert.equal(db.rows[0]?.status, "applied");
+      assert.equal(db.rows[0]?.notes, null);
+      assert.equal(db.rows[0]?.appliedAt.toISOString(), original.appliedAt.toISOString());
+    }
+  });
 });
 
 describe("toBoardJob", () => {
@@ -424,7 +505,7 @@ describe("toBoardJob", () => {
         seedJob({
           id: "a1",
           userId: "user-a",
-          appliedAt: new Date("2026-09-07T23:30:00.000Z"),
+          appliedAt: new Date("2026-09-07T00:30:00.000Z"),
         })
       );
       assert.equal(boardJob.appliedAt, "2026-09-07");
