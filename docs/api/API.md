@@ -32,11 +32,13 @@ Dual Upstash sliding-window ceilings (R21):
 
 | Bucket | Env var | Default |
 |--------|---------|---------|
-| Per client IP | `RATE_LIMIT_MAX` | `5` |
+| Per caller (`session:<id>` after successful auth, else client IP) | `RATE_LIMIT_MAX` | `5` |
 | Per shared-secret hash | `RATE_LIMIT_SECRET_MAX` | `floor(RATE_LIMIT_MAX / 2)` (min 1) |
 | Window | `RATE_LIMIT_WINDOW` | `60000` ms |
 
-Success responses return the **more restrictive** `remaining` / `resetTime` of the two buckets. `sessionId` does not key rate limits.
+Success responses return the **more restrictive** `remaining` / `resetTime` of the two buckets. After successful Bearer, a usable body `sessionId` (`A-Za-z0-9_-`, length 1..`RATE_LIMIT_SESSION_ID_MAX_CHARS`, default 128) keys the per-caller bucket as `session:<id>`. Omitted or invalid `sessionId` keeps the rightmost `x-forwarded-for` IP. Failed auth never honors `sessionId`. The hashed-secret bucket remains the global cap.
+
+**ccc-frontend BFF:** after a valid session, this app applies a best-effort per-user window to tailor and job mutations (see `.env.example` `RATE_LIMIT_*` / `JOB_RATE_LIMIT_MAX`). The window is in-memory and process-local: it resets on restart and is not shared across instances. `POST /api/tailor` sends CCC `sessionId` equal to that user id next to the existing Bearer key. It does not copy inbound client headers. On limit, the BFF returns `{ "error": "..." }` with a `Retry-After` delay-seconds header only (no `remaining` / `resetTime` in the JSON body). When CCC returns 429, the BFF forwards `Retry-After` when CCC supplies `Retry-After` or a numeric `resetTime` in the upstream JSON.
 
 ```json
 HTTP 429
@@ -46,6 +48,8 @@ HTTP 429
   "resetTime": 1717632000000
 }
 ```
+
+(Upstream CCC may include `remaining` / `resetTime`; the BFF tailors JSON does not.)
 
 ---
 
@@ -71,7 +75,7 @@ Headers: `Content-Type: application/json`, `Authorization: Bearer <TAILOR_API_KE
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `jobDescription` | `string` | Yes | Untrusted JD text; size capped by `TAILOR_JD_MAX_CHARS` (default 50000) |
-| `sessionId` | `string` | No | Optional caller ID (not used for rate limiting) |
+| `sessionId` | `string` | No | Optional. After successful auth, a usable value (`A-Za-z0-9_-`, length 1..`RATE_LIMIT_SESSION_ID_MAX_CHARS`, default 128) keys the per-caller bucket as `session:<id>`. Omitted or invalid values keep the client IP. Failed auth does not use this field. |
 | `curationMode` | `"strict"` \| `"flexible"` | No | Defaults to `TAILOR_DEFAULT_CURATION_MODE` (or `strict`). `strict`: cut/reorder/trim discrete master roles only (no category-style collapse). `flexible`: transferable-skills pivot with cover letter generation; foregrounds adjacent experience via grounded category-style collapse of weak-fit role clusters |
 
 Request body size capped by `TAILOR_REQUEST_MAX_BYTES` (default 65536).
@@ -106,7 +110,7 @@ Request body size capped by `TAILOR_REQUEST_MAX_BYTES` (default 65536).
 | `curatedJson` | Schema-valid curated CV (caller-owned for history/regen) |
 | `builderVersion` | Mechanical builder semver; keep with JSON for style-stable regen |
 | `curationMode` | Echo of the mode used for this tailor (`strict` or `flexible`) |
-| `remaining` / `resetTime` | More restrictive of dual rate-limit buckets |
+| `remaining` / `resetTime` | More restrictive of the per-caller bucket and the shared-secret bucket. The per-caller bucket is `session:<id>` when that authed body had a usable `sessionId`; otherwise it is the client IP. |
 
 Total JSON response size capped by `TAILOR_RESPONSE_MAX_BYTES` (default 2MiB).
 
