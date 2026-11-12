@@ -27,3 +27,7 @@ Plan: [Kanban job tracker](./2026-09-06-002-feat-kanban-job-tracker-plan.md)
 - Drain-style: one `/lfg` per `lfg` row. Next after M2 is **not** M3 until Kanban ships and is unparked.
 - Gantt and nudges stay `parked` until Kanban exists (they extend the same job records).
 - Do not put `TAILOR_API_KEY` in the browser.
+
+## Other plans
+
+- [Patch critical Next.js and better-auth advisories - Plan](./2026-11-12-chore-patch-critical-advisories-plan.md)
