@@ -43,6 +43,7 @@ export function createMemoryStore(): RateLimitStore {
   return { hits: new Map() };
 }
 
+// Process-local best-effort window. Not shared across instances; resets on restart.
 const defaultStore = createMemoryStore();
 
 export function tailorRateLimitConfig(): RateLimitConfig {
