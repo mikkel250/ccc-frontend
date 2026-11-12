@@ -8,8 +8,75 @@ type PackageJson = {
   devDependencies?: Record<string, string>;
 };
 
+type Lockfile = {
+  packages?: Record<string, { version?: unknown }>;
+};
+
+type Floor = {
+  name: string;
+  meets: (version: string) => boolean;
+  message: string;
+};
+
 function readPackageJson(): PackageJson {
   return JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as PackageJson;
+}
+
+function readLockfile(): Lockfile {
+  return JSON.parse(readFileSync(join(process.cwd(), "package-lock.json"), "utf8")) as Lockfile;
+}
+
+function requireVersion(value: unknown, label: string): string {
+  assert.equal(typeof value, "string", `${label} version must be a string`);
+  return value as string;
+}
+
+function lockVersion(lock: Lockfile, name: string): string {
+  return requireVersion(lock.packages?.[`node_modules/${name}`]?.version, `${name} lockfile`);
+}
+
+function installedVersion(name: string): string {
+  const installed = JSON.parse(
+    readFileSync(join(process.cwd(), "node_modules", name, "package.json"), "utf8")
+  ) as { version?: unknown };
+  return requireVersion(installed.version, `${name} installed`);
+}
+
+const resolvedFloors: Floor[] = [
+  {
+    name: "next",
+    meets: (version) => sameMinorAtLeast(version, 15, 5, 29),
+    message: "15.5.29 or a later 15.5.x",
+  },
+  {
+    name: "eslint-config-next",
+    meets: (version) => sameMinorAtLeast(version, 15, 5, 29),
+    message: "15.5.29 or a later 15.5.x",
+  },
+  {
+    name: "better-auth",
+    meets: (version) => sameMinorAtLeast(version, 1, 7, 22),
+    message: "1.7.22 or a later 1.7.x",
+  },
+  {
+    name: "@better-auth/memory-adapter",
+    meets: (version) => sameMinorAtLeast(version, 1, 7, 22),
+    message: "1.7.22 or a later 1.7.x",
+  },
+  {
+    name: "zod",
+    meets: (version) => gte(version, [4, 6, 6]),
+    message: ">= 4.6.6",
+  },
+];
+
+function ignoreBlock(config: string, dependencyName: string): string {
+  const needle = `dependency-name: "${dependencyName}"`;
+  const start = config.indexOf(needle);
+  assert.notEqual(start, -1, `Dependabot ignore missing for ${dependencyName}`);
+  const rest = config.slice(start + needle.length);
+  const next = rest.search(/\n\s*- dependency-name:/);
+  return next === -1 ? rest : rest.slice(0, next);
 }
 
 function parseVersion(raw: string): [number, number, number] {
@@ -94,6 +161,25 @@ describe("patched advisory floors", () => {
     const zod = pkg.dependencies?.zod ?? "";
     assert.equal(gte(zod, [4, 6, 6]), true, `zod ${zod} must be >= 4.6.6`);
   });
+
+  it("resolves the lockfile and the installed copies to those floors", () => {
+    const lock = readLockfile();
+    for (const floor of resolvedFloors) {
+      const locked = lockVersion(lock, floor.name);
+      const installed = installedVersion(floor.name);
+      assert.equal(
+        floor.meets(locked),
+        true,
+        `${floor.name} lockfile ${locked} must be ${floor.message}`
+      );
+      assert.equal(
+        floor.meets(installed),
+        true,
+        `${floor.name} installed ${installed} must be ${floor.message}`
+      );
+      assert.equal(installed, locked, `${floor.name} installed ${installed} must match lockfile ${locked}`);
+    }
+  });
 });
 
 describe("Dependabot", () => {
@@ -105,9 +191,11 @@ describe("Dependabot", () => {
     assert.match(config, /interval:\s*weekly/);
     assert.match(config, /dependency-name:\s*"\*"/);
     assert.match(config, /update-types:\s*\["version-update:semver-major"\]/);
-    assert.match(config, /dependency-name:\s*"better-auth"/);
-    assert.match(config, /versions:\s*\[">=1\.8\.0-0"\]/);
-    assert.match(config, /dependency-name:\s*"@better-auth\/memory-adapter"/);
+    const betterAuth = ignoreBlock(config, "better-auth");
+    const memoryAdapter = ignoreBlock(config, "@better-auth/memory-adapter");
+    assert.match(betterAuth, /versions:\s*\["\>=1\.8\.0-0"\]/);
+    assert.match(memoryAdapter, /versions:\s*\["\>=1\.8\.0-0"\]/);
+    assert.doesNotMatch(betterAuth, /@better-auth\/memory-adapter/);
   });
 });
 
