@@ -253,6 +253,38 @@ describe("POST /api/tailor", () => {
     assert.equal(body.error, INVALID_JSON);
   });
 
+  it("returns 400 for non-object JSON bodies without calling CCC", async () => {
+    const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY"]);
+    process.env.CCC_API_URL = "http://ccc.test";
+    process.env.TAILOR_API_KEY = "secret-key-value";
+    const originalFetch = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return Response.json({ cv: "UEsDbA==" });
+    }) as typeof fetch;
+    try {
+      for (const raw of ["null", "[]", '"Senior engineer"', "12"]) {
+        called = false;
+        const response = await handleTailorPost(
+          new Request("http://127.0.0.1/api/tailor", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: raw,
+          }),
+          signedIn
+        );
+        assert.equal(response.status, 400, raw);
+        assert.equal(called, false, raw);
+        const body = (await response.json()) as { error?: string };
+        assert.equal(body.error, "Job description is required.");
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      restore();
+    }
+  });
+
   it("ignores non-string jobDescription values", async () => {
     let seenJd = "unset";
     const response = await handleTailorPost(
@@ -380,10 +412,10 @@ describe("POST /api/tailor", () => {
     assert.equal(/secret|key|bearer/i.test(body.error ?? ""), false);
   });
 
-  it("forwards the Vercel platform IP and ignores inbound x-forwarded-for", async () => {
+  it("forwards TRUSTED_CCC_CLIENT_IP and ignores inbound and platform IP headers", async () => {
     const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY", "VERCEL", "CCC_TRUSTED_PROXY"]);
     process.env.VERCEL = "1";
-    delete process.env.CCC_TRUSTED_PROXY;
+    process.env.CCC_TRUSTED_PROXY = "vercel";
     process.env.CCC_API_URL = "http://ccc.test";
     process.env.TAILOR_API_KEY = "secret-key-value";
     const originalFetch = globalThis.fetch;
@@ -407,11 +439,36 @@ describe("POST /api/tailor", () => {
         signedIn
       );
       assert.equal(response.status, 200);
-      assert.equal(forwarded, "192.0.2.40");
+      assert.equal(forwarded, TRUSTED_CCC_CLIENT_IP);
     } finally {
       globalThis.fetch = originalFetch;
       restore();
     }
+  });
+
+  it("does not pass a request IP to an injected tailor", async () => {
+    let received: unknown = "unset";
+    const response = await handleTailorPost(
+      new Request("http://127.0.0.1/api/tailor", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": "203.0.113.10",
+          "x-real-ip": "198.51.100.20",
+          "x-vercel-forwarded-for": "192.0.2.40",
+        },
+        body: JSON.stringify({ jobDescription: "Senior engineer JD" }),
+      }),
+      {
+        ...signedIn,
+        tailor: async (_jobDescription, deps) => {
+          received = deps;
+          return { ok: true, cv: "UEsDbA==", replyText: null };
+        },
+      }
+    );
+    assert.equal(response.status, 200);
+    assert.equal(received, undefined);
   });
 
   it("sends loopback when the proxy topology is not trusted", async () => {
