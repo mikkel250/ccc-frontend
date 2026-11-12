@@ -417,6 +417,27 @@ describe("jobs isolation", () => {
     assert.equal(boardJob.appliedAt, "2026-09-07");
   });
 
+  it("uses the UTC calendar date near midnight when TZ is not UTC", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const boardJob = toBoardJob(
+        seedJob({
+          id: "a1",
+          userId: "user-a",
+          appliedAt: new Date("2026-09-07T00:30:00.000Z"),
+        })
+      );
+      assert.equal(boardJob.appliedAt, "2026-09-07");
+    } finally {
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
+    }
+  });
+
   it("deletes the caller's own job", async () => {
     const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
     const result = await deleteJob("user-a", "a1", { db });
@@ -646,5 +667,30 @@ describe("jobs isolation", () => {
     assert.equal(attempts, 2);
     assert.equal(db.rows[0]?.status, "interview");
     assert.equal(db.rows[0]?.position, 0);
+  });
+
+  it("rejects whitespace-only company and title", async () => {
+    const db = createMemoryStore();
+    const company = await createJob("user-a", { company: "   ", title: "Eng" }, { db });
+    const title = await createJob("user-a", { company: "Acme", title: " \t " }, { db });
+    assert.equal(company.ok, false);
+    assert.equal(title.ok, false);
+    if (!company.ok) {
+      assert.equal(company.error, "Check the company, title, URL, and notes.");
+    }
+    if (!title.ok) {
+      assert.equal(title.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows.length, 0);
+
+    const existing = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", company: "Acme", title: "Keep me" }),
+    ]);
+    const blankCompany = await updateJob("user-a", "a1", { company: "   " }, { db: existing });
+    const blankTitle = await updateJob("user-a", "a1", { title: " \t " }, { db: existing });
+    assert.equal(blankCompany.ok, false);
+    assert.equal(blankTitle.ok, false);
+    assert.equal(existing.rows[0]?.company, "Acme");
+    assert.equal(existing.rows[0]?.title, "Keep me");
   });
 });
