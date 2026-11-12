@@ -31,6 +31,15 @@ function snapshotEnv(keys: string[]): () => void {
 
 const signedIn = { getSessionUserId: async () => "user-a" as string | null };
 
+function byteStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
 function streamingJsonRequest(stream: ReadableStream<Uint8Array>): Request {
   const init: RequestInit & { duplex: "half" } = {
     method: "POST",
@@ -69,6 +78,35 @@ describe("readTailorJobDescription", () => {
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.jobDescription, "hello");
+    }
+  });
+
+  it("caps a multibyte body on UTF-8 bytes", async () => {
+    const jobDescription = "€😀";
+    const exact = Buffer.from(JSON.stringify({ jobDescription }));
+    const characters = JSON.stringify({ jobDescription }).length;
+    assert.ok(exact.byteLength > characters);
+    assert.ok(exact.byteLength - 1 >= characters);
+
+    const exactResult = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(exact)),
+      exact.byteLength
+    );
+    assert.equal(exactResult.ok, true);
+    if (exactResult.ok) {
+      assert.equal(exactResult.jobDescription, jobDescription);
+    }
+
+    const oneByteOver = Buffer.concat([exact, Buffer.from([0x20])]);
+    assert.equal(oneByteOver.byteLength, exact.byteLength + 1);
+    const overResult = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(oneByteOver)),
+      exact.byteLength
+    );
+    assert.equal(overResult.ok, false);
+    if (!overResult.ok) {
+      assert.equal(overResult.status, 413);
+      assert.equal(overResult.error, BODY_TOO_LARGE);
     }
   });
 
@@ -215,6 +253,26 @@ describe("POST /api/tailor", () => {
     assert.equal(body.error, INVALID_JSON);
   });
 
+  it("ignores non-string jobDescription values", async () => {
+    let seenJd = "unset";
+    const response = await handleTailorPost(
+      new Request("http://127.0.0.1/api/tailor", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jobDescription: 12345 }),
+      }),
+      {
+        ...signedIn,
+        tailor: async (jobDescription) => {
+          seenJd = jobDescription;
+          return { ok: false, status: 400, error: "Job description is required." };
+        },
+      }
+    );
+    assert.equal(seenJd, "");
+    assert.equal(response.status, 400);
+  });
+
   it("returns 400 for a missing job description without calling CCC", async () => {
     const restore = snapshotEnv(["CCC_API_URL", "TAILOR_API_KEY"]);
     process.env.CCC_API_URL = "http://ccc.test";
@@ -272,6 +330,31 @@ describe("POST /api/tailor", () => {
       globalThis.fetch = originalFetch;
       restore();
     }
+  });
+
+  it("returns 401 before a stalled body can block the handler", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => undefined);
+      },
+    });
+    let called = false;
+    const response = await Promise.race([
+      handleTailorPost(streamingJsonRequest(stream), {
+        getSessionUserId: async () => null,
+        tailor: async () => {
+          called = true;
+          return { ok: true, cv: "UEsDbA==", replyText: null };
+        },
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("401 waited on the body")), 200);
+      }),
+    ]);
+    assert.equal(response.status, 401);
+    assert.equal(called, false);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, "Sign in required.");
   });
 
   it("returns 401 without a session and does not call CCC", async () => {

@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { memoryAdapter, type MemoryDB } from "@better-auth/memory-adapter";
+import { betterAuth } from "better-auth";
 import { NextRequest } from "next/server";
 import { middleware } from "../middleware";
 import { renderBoard } from "../app/board/page";
@@ -59,5 +61,67 @@ describe("board authentication", () => {
       loginRedirect
     );
     assert.equal(ran, false);
+  });
+
+  it("does not authorize a forged session cookie", async () => {
+    const database: MemoryDB = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+    };
+    const auth = betterAuth({
+      secret: "test-secret-at-least-32-characters-long",
+      baseURL: "http://127.0.0.1:3000",
+      database: memoryAdapter(database),
+      emailAndPassword: { enabled: true, minPasswordLength: 8 },
+    });
+    await auth.api.signUpEmail({
+      body: {
+        name: "Operator",
+        email: "operator@example.com",
+        password: "test-password",
+      },
+    });
+    const signedIn = await auth.api.signInEmail({
+      body: {
+        email: "operator@example.com",
+        password: "test-password",
+      },
+      returnHeaders: true,
+    });
+    const sessionCookie = signedIn.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const real = await auth.api.getSession({
+      headers: new Headers({ cookie: sessionCookie }),
+    });
+    assert.equal(real?.user.email, "operator@example.com");
+
+    const forgedCookie = "better-auth.session_token=forged-token";
+    const forged = await auth.api.getSession({
+      headers: new Headers({ cookie: forgedCookie }),
+    });
+    assert.equal(forged, null);
+
+    const response = middleware(
+      new NextRequest("http://127.0.0.1/board", {
+        headers: { cookie: forgedCookie },
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("location"), null);
+
+    let listed = false;
+    await assert.rejects(
+      () =>
+        renderBoard({
+          requireUserId: () => requireSessionUserId(async () => forged?.user.id ?? null),
+          list: async () => {
+            listed = true;
+            return { ok: true, jobs: [] };
+          },
+        }),
+      loginRedirect
+    );
+    assert.equal(listed, false);
   });
 });

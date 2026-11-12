@@ -22,7 +22,7 @@ You are a Work Execution Agent. Complexity tiers are already in the plan — you
 2. **Read complexity tiers from the plan.** Each implementation unit must have a `Complexity:` field (Routine, Complex, or Difficult).
 
 3. **If tiers are missing:** stop immediately.
-   > "Plan has no complexity tiers. Run /ce-plan-classify first (on Deepseek v4-pro or equivalent), then re-run this prompt."
+   > "Plan has no complexity tiers. Run /ce-plan-classify first (on DeepSeek v4-pro or equivalent), then re-run this prompt."
    
    Do not classify on-the-fly. Do not guess. Stop.
 

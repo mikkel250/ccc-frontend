@@ -195,7 +195,7 @@ npm run build
 - `docs/solutions/`: institutional learnings (bugs, practices, workflow patterns) with YAML frontmatter where present.
 - `docs/brainstorms/`, `docs/ideation/`, `docs/residual-review-findings/`: CE workflow artifacts.
 - `docs/archive/`: local historical notes (gitignored by default).
-- All directories and markdown filenames under `docs/` use kebab-case (`README.md` exception). Update the nearest `README.md` index when adding/moving docs.
+- All directories and markdown filenames under `docs/` use kebab-case. `README.md` and the companion mirror `docs/api/API.md` keep those names. Update the nearest `README.md` index when adding/moving docs.
 
 ## Agent-Specific Entrypoints
 

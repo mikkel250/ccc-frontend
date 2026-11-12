@@ -4,7 +4,7 @@ This directory keeps project knowledge close to the code.
 
 ## Naming
 
-- All directories and markdown filenames under `docs/` use kebab-case (matching compound-engineering conventions). `README.md` filenames are the only exception — kept as-is for discoverability.
+- All directories and markdown filenames under `docs/` use kebab-case (matching compound-engineering conventions). Two names stay outside that pattern: `README.md`, for discoverability, and `api/API.md`, which keeps the companion CCC mirror path.
 - Prefer focused markdown files; split when a domain grows; keep `README.md` as the local index.
 
 ## Indexing

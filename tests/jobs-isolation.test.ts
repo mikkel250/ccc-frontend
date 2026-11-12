@@ -4,140 +4,14 @@ import {
   createJob,
   deleteJob,
   listJobs,
+  toBoardJob,
   updateJob,
   type JobRecord,
-  type JobsStore,
 } from "../lib/jobs";
-
-function createMemoryStore(seed: JobRecord[] = []): JobsStore & { rows: JobRecord[] } {
-  const rows = seed.map((row) => ({ ...row }));
-  let transactionTail = Promise.resolve();
-  const store: JobsStore & { rows: JobRecord[] } = {
-    rows,
-    async $transaction(run) {
-      const previous = transactionTail;
-      let release = () => {};
-      transactionTail = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      await previous;
-      try {
-        return await run({ job: store.job });
-      } finally {
-        release();
-      }
-    },
-    job: {
-      async findMany({ where, orderBy }) {
-        let result = rows.filter((row) => row.userId === where.userId);
-        if (where.status) {
-          result = result.filter((row) => row.status === where.status);
-        }
-        if (orderBy) {
-          const keys = Array.isArray(orderBy) ? orderBy : [orderBy];
-          result = [...result].sort((a, b) => {
-            for (const key of keys) {
-              const field = Object.keys(key)[0] as keyof JobRecord | undefined;
-              if (!field) continue;
-              const dir = key[field] === "desc" ? -1 : 1;
-              const left = a[field];
-              const right = b[field];
-              if (left == null && right != null) return -1 * dir;
-              if (left != null && right == null) return 1 * dir;
-              if (left != null && right != null && left < right) return -1 * dir;
-              if (left != null && right != null && left > right) return 1 * dir;
-            }
-            return 0;
-          });
-        }
-        return result.map((row) => ({ ...row }));
-      },
-      async findFirst({ where }) {
-        const row = rows.find(
-          (candidate) =>
-            candidate.id === where.id &&
-            (!where.userId || candidate.userId === where.userId)
-        );
-        return row ? { ...row } : null;
-      },
-      async create({ data }) {
-        const now = new Date();
-        const row: JobRecord = {
-          id: data.id ?? `job-${rows.length + 1}`,
-          userId: data.userId,
-          company: data.company,
-          title: data.title,
-          url: data.url ?? null,
-          notes: data.notes ?? null,
-          status: data.status,
-          position: data.position,
-          appliedAt: data.appliedAt ?? now,
-          createdAt: now,
-          updatedAt: now,
-        };
-        rows.push(row);
-        return { ...row };
-      },
-      async update({ where, data }) {
-        const index = rows.findIndex((row) => row.id === where.id);
-        if (index < 0) {
-          throw new Error("not found");
-        }
-        rows[index] = {
-          ...rows[index],
-          ...data,
-          updatedAt: new Date(),
-        };
-        return { ...rows[index] };
-      },
-      async updateMany({ where, data }) {
-        const index = rows.findIndex(
-          (row) => row.id === where.id && row.userId === where.userId
-        );
-        if (index < 0) {
-          return { count: 0 };
-        }
-        rows[index] = {
-          ...rows[index],
-          ...data,
-          updatedAt: new Date(),
-        };
-        return { count: 1 };
-      },
-      async deleteMany({ where }) {
-        const before = rows.length;
-        for (let index = rows.length - 1; index >= 0; index -= 1) {
-          const row = rows[index];
-          if (row.id === where.id && row.userId === where.userId) {
-            rows.splice(index, 1);
-          }
-        }
-        return { count: before - rows.length };
-      },
-      async aggregate({ where }) {
-        const matching = rows.filter(
-          (row) =>
-            row.userId === where.userId &&
-            (!where.status || row.status === where.status)
-        );
-        const positions = matching.map((row) => row.position);
-        return {
-          _max: { position: positions.length ? Math.max(...positions) : null },
-        };
-      },
-    },
-  };
-  return store;
-}
-
-function positionConflict(): Error {
-  return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
-}
+import { createMemoryStore } from "./memory-jobs-store";
 
 function allowOverlappingPositionConflicts(db: ReturnType<typeof createMemoryStore>): void {
   const aggregate = db.job.aggregate.bind(db.job);
-  const create = db.job.create.bind(db.job);
-  const updateMany = db.job.updateMany.bind(db.job);
   let readers = 0;
   let releaseBoth: () => void = () => {};
   const bothRead = new Promise<void>((resolve) => {
@@ -153,35 +27,6 @@ function allowOverlappingPositionConflicts(db: ReturnType<typeof createMemorySto
       await bothRead;
     }
     return snapshot;
-  };
-  db.job.create = async (args) => {
-    const taken = db.rows.some(
-      (row) =>
-        row.userId === args.data.userId &&
-        row.status === args.data.status &&
-        row.position === args.data.position
-    );
-    if (taken) {
-      throw positionConflict();
-    }
-    return create(args);
-  };
-  db.job.updateMany = async (args) => {
-    const status = args.data.status;
-    const position = args.data.position;
-    if (status !== undefined && position !== undefined) {
-      const taken = db.rows.some(
-        (row) =>
-          row.id !== args.where.id &&
-          row.userId === args.where.userId &&
-          row.status === status &&
-          row.position === position
-      );
-      if (taken) {
-        throw positionConflict();
-      }
-    }
-    return updateMany(args);
   };
 }
 
@@ -301,15 +146,17 @@ describe("jobs isolation", () => {
   });
 
   it("retries a create when its position conflicts", async () => {
-    const db = createMemoryStore();
-    const create = db.job.create;
-    let attempts = 0;
-    db.job.create = async (args) => {
-      attempts += 1;
-      if (attempts === 1) {
-        throw Object.assign(new Error("position conflict"), { code: "P2002" });
+    const db = createMemoryStore([
+      seedJob({ id: "taken", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    const aggregate = db.job.aggregate.bind(db.job);
+    let reads = 0;
+    db.job.aggregate = async (args) => {
+      reads += 1;
+      if (reads === 1) {
+        return { _max: { position: null } };
       }
-      return create(args);
+      return aggregate(args);
     };
 
     const result = await createJob(
@@ -319,8 +166,73 @@ describe("jobs isolation", () => {
     );
 
     assert.equal(result.ok, true);
-    assert.equal(attempts, 2);
-    assert.equal(db.rows[0]?.position, 0);
+    assert.equal(reads, 2);
+    assert.deepEqual(
+      db.rows.map((row) => row.position).sort((left, right) => left - right),
+      [0, 1]
+    );
+  });
+
+  it("restores rows when a transaction writes and then throws", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a", title: "Keep me" })]);
+    await assert.rejects(
+      () =>
+        db.$transaction(async (tx) => {
+          await tx.job.create({
+            data: {
+              userId: "user-a",
+              company: "Beta",
+              title: "Temp",
+              url: null,
+              notes: null,
+              status: "applied",
+              position: 1,
+              appliedAt: now,
+            },
+          });
+          const listed = await tx.job.findMany({ where: { userId: "user-a" } });
+          assert.equal(listed.length, 2);
+          throw new Error("read failed");
+        }),
+      /read failed/
+    );
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0]?.title, "Keep me");
+
+    await Promise.race([
+      db.$transaction(async (tx) => {
+        await tx.job.updateMany({
+          where: { id: "a1", userId: "user-a" },
+          data: { title: "After" },
+        });
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("transaction lock was not released")), 500);
+      }),
+    ]);
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0]?.title, "After");
+  });
+
+  it("stops after repeated position conflicts", async () => {
+    const db = createMemoryStore();
+    let attempts = 0;
+    db.job.create = async () => {
+      attempts += 1;
+      throw Object.assign(new Error("position conflict"), { code: "P2002" });
+    };
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Engineer" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(attempts, 4);
+    assert.equal(db.rows.length, 0);
   });
 
   it("requires a user id at the call boundary", async () => {
@@ -331,6 +243,178 @@ describe("jobs isolation", () => {
       assert.equal(result.code, "invalid");
     }
     assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects an invalid applied date on create", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", appliedAt: "not-a-date" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the applied date.");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects notes longer than 4000 characters", async () => {
+    const db = createMemoryStore();
+    const result = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng", notes: "n".repeat(4001) },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows.length, 0);
+  });
+
+  it("rejects an invalid update URL and leaves the row", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", url: "https://jobs.example/a" }),
+    ]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { url: "javascript:alert(1)" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows[0]?.url, "https://jobs.example/a");
+    assert.equal(db.rows[0]?.title, "Engineer");
+  });
+
+  it("rejects an invalid update status and leaves the row", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { status: "wishlist" as "applied" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Choose a valid column.");
+    }
+    assert.equal(db.rows[0]?.status, "applied");
+    assert.equal(db.rows[0]?.position, 0);
+  });
+
+  it("rejects an invalid update date and leaves the row", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { appliedAt: "not-a-date" },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the applied date.");
+    }
+    assert.equal(db.rows[0]?.appliedAt.toISOString(), now.toISOString());
+  });
+
+  it("rejects overlong notes on update and leaves the row", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a", notes: "keep" })]);
+    const result = await updateJob(
+      "user-a",
+      "a1",
+      { notes: "n".repeat(4001) },
+      { db }
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Check the company, title, URL, and notes.");
+    }
+    assert.equal(db.rows[0]?.notes, "keep");
+  });
+
+  it("returns a save error when update storage throws and leaves the row", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", title: "Keep me", status: "applied" }),
+    ]);
+    db.$transaction = async () => {
+      throw new Error("db down");
+    };
+    const result = await updateJob("user-a", "a1", { title: "Changed" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(db.rows[0]?.title, "Keep me");
+    assert.equal(db.rows[0]?.status, "applied");
+  });
+
+  it("leaves the row unchanged when a column move fails in the store", async () => {
+    const db = createMemoryStore([
+      seedJob({ id: "a1", userId: "user-a", status: "applied", position: 0 }),
+    ]);
+    db.job.updateMany = async () => {
+      throw new Error("db down");
+    };
+    const result = await updateJob("user-a", "a1", { status: "offer" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(db.rows[0]?.status, "applied");
+    assert.equal(db.rows[0]?.position, 0);
+    assert.equal(db.rows[0]?.title, "Engineer");
+  });
+
+  it("returns a save error when delete storage throws and leaves the row", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    db.job.deleteMany = async () => {
+      throw new Error("db down");
+    };
+    const result = await deleteJob("user-a", "a1", { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Could not save. Please try again.");
+    }
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0]?.id, "a1");
+  });
+
+  it("rejects an empty job id on update", async () => {
+    const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
+    const result = await updateJob("user-a", "  ", { title: "New title" }, { db });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "invalid");
+      assert.equal(result.error, "Job is required.");
+    }
+    assert.equal(db.rows[0].title, "Engineer");
+  });
+
+  it("formats board jobs with a YYYY-MM-DD applied date", () => {
+    const boardJob = toBoardJob(
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        appliedAt: new Date("2026-09-07T15:30:00.000Z"),
+      })
+    );
+    assert.equal(boardJob.appliedAt, "2026-09-07");
   });
 
   it("deletes the caller's own job", async () => {
