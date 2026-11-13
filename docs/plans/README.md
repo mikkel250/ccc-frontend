@@ -28,4 +28,8 @@ Plan: [Kanban job tracker](./2026-09-06-002-feat-kanban-job-tracker-plan.md)
 - Gantt and nudges stay `parked` until Kanban exists (they extend the same job records).
 - Do not put `TAILOR_API_KEY` in the browser.
 
+## Other plans
+
+- [Patch critical Next.js and better-auth advisories - Plan](./2026-11-12-chore-patch-critical-advisories-plan.md)
+
 Related (not a drain row): [User ID rate limit](./2026-11-10-2327-feat-user-id-rate-limit-plan.md) — session-keyed BFF limits. The Kanban plan does not own this ceiling. It does not replace M2.
