@@ -10,7 +10,7 @@ function read(path: string): string {
 }
 
 describe("CI workflow", () => {
-  it("gates pull requests and main with lint, typecheck, and tests", () => {
+  it("gates pull requests and main with lint, typecheck, tests, schema validation, and build", () => {
     const yaml = read(".github/workflows/ci.yml");
 
     assert.match(yaml, /\bpull_request:/);
@@ -26,9 +26,11 @@ describe("CI workflow", () => {
     assert.match(yaml, /cache:\s*npm/);
 
     assert.match(yaml, /run:\s*npm ci\b/);
+    assert.match(yaml, /run:\s*npx prisma validate\b/);
     assert.match(yaml, /run:\s*npm run lint\b/);
     assert.match(yaml, /run:\s*npm run typecheck\b/);
     assert.match(yaml, /run:\s*npm test\b/);
+    assert.match(yaml, /run:\s*npm run build\b/);
 
     assert.doesNotMatch(yaml, /\$\{\{\s*secrets\./);
     assert.doesNotMatch(yaml, /TAILOR_API_KEY/);
