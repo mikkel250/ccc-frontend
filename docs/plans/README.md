@@ -28,7 +28,7 @@ These sit outside the milestone table. Drain skips them.
 
 | Plan | When |
 | --- | --- |
-| [Tailor hardening test gaps](./2026-11-10-1737-test-tailor-hardening-test-gaps-plan.md) | After the tailor hardening pull request merges |
+| [Tailor hardening test gaps](./2026-11-10-1737-test-tailor-hardening-test-gaps-plan.md) | Hardening is on main (PR #5) |
 
 ## How to update
 
