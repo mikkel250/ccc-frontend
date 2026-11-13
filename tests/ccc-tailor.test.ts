@@ -621,6 +621,30 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("keeps Retry-After when a CCC 429 body is not JSON", async () => {
+    const events: SafeLogEvent[] = [];
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      log: (event) => events.push(event),
+      fetchImpl: async () =>
+        new Response("rate limited", {
+          status: 429,
+          headers: { "Retry-After": "45", "content-type": "text/plain" },
+        }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 429);
+      assert.equal(result.retryAfterSeconds, 45);
+      assert.equal(result.error, GENERIC_ERROR);
+    }
+    assert.equal(
+      events.some((event) => event.event === "ccc.response_parse_failed"),
+      true
+    );
+  });
+
   it("derives retryAfterSeconds from resetTime when Retry-After is missing", async () => {
     const now = Date.now();
     const result = await tailorOnDemand("Senior engineer JD", {

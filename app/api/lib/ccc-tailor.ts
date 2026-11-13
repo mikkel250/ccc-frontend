@@ -212,10 +212,7 @@ export async function tailorOnDemand(
     if (isTimeoutOrAbortError(error)) {
       return { ok: false, status: 504, error: GENERIC_ERROR };
     }
-    if (!response.ok) {
-      return { ok: false, status: response.status, error: GENERIC_ERROR };
-    }
-    return { ok: false, status: 502, error: GENERIC_ERROR };
+    body = null;
   }
 
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
