@@ -1,12 +1,14 @@
 "use server";
 
 import { createJob, deleteJob, updateJob, type JobStatus, type JobsStore } from "@/lib/jobs";
-import { runJobAction } from "@/lib/job-actions";
+import { runJobAction, type JobActionRunDeps } from "@/lib/job-actions";
+import type { RateLimitResult } from "@/lib/rate-limit";
 
 type JobActionDeps = {
   requireUserId?: () => Promise<string>;
   revalidate?: () => void;
   db?: JobsStore;
+  consume?: (key: string) => RateLimitResult;
 };
 
 function formString(formData: FormData, key: string): string {
@@ -14,10 +16,11 @@ function formString(formData: FormData, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-function runDeps(deps: JobActionDeps) {
+function runDeps(deps: JobActionDeps): JobActionRunDeps {
   return {
     requireUserId: deps.requireUserId,
     revalidate: deps.revalidate,
+    consume: deps.consume,
   };
 }
 

@@ -17,6 +17,7 @@ export type TailorFailure = {
   ok: false;
   status: number;
   error: string;
+  retryAfterSeconds?: number;
 };
 
 export type TailorResult = TailorSuccess | TailorFailure;
@@ -26,6 +27,7 @@ export type TailorDeps = {
   apiUrl?: string | undefined;
   apiKey?: string | undefined;
   timeoutMs?: number | undefined;
+  sessionId?: string | undefined;
 };
 
 const SAFE_CCC_ERRORS = new Set([
@@ -90,6 +92,44 @@ function isTimeoutOrAbortError(error: unknown): boolean {
   return error.name === "TimeoutError" || error.name === "AbortError";
 }
 
+function retryAfterHeaderSeconds(header: string, now: number): number | undefined {
+  const trimmed = header.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const delaySeconds = Number(trimmed);
+    if (Number.isFinite(delaySeconds) && delaySeconds >= 1) {
+      return delaySeconds;
+    }
+    return undefined;
+  }
+  const dateMs = Date.parse(trimmed);
+  if (!Number.isFinite(dateMs)) {
+    return undefined;
+  }
+  return Math.max(1, Math.ceil((dateMs - now) / 1000));
+}
+
+export function resolveCccRetryAfterSeconds(
+  response: Response,
+  record: Record<string, unknown>,
+  now: number = Date.now()
+): number | undefined {
+  if (response.status !== 429) {
+    return undefined;
+  }
+  const header = response.headers.get("Retry-After");
+  if (header != null) {
+    const delaySeconds = retryAfterHeaderSeconds(header, now);
+    if (delaySeconds != null) {
+      return delaySeconds;
+    }
+  }
+  const resetTime = record.resetTime;
+  if (typeof resetTime === "number" && Number.isFinite(resetTime)) {
+    return Math.max(1, Math.ceil((resetTime - now) / 1000));
+  }
+  return undefined;
+}
+
 export async function tailorOnDemand(
   jobDescription: string,
   deps: TailorDeps = {}
@@ -125,6 +165,7 @@ export async function tailorOnDemand(
       body: JSON.stringify({
         jobDescription: jd,
         curationMode: "strict",
+        ...(deps.sessionId?.trim() ? { sessionId: deps.sessionId.trim() } : {}),
       }),
       signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps)),
     });
@@ -147,10 +188,12 @@ export async function tailorOnDemand(
 
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   if (!response.ok) {
+    const retryAfterSeconds = resolveCccRetryAfterSeconds(response, record);
     return {
       ok: false,
       status: response.status,
       error: clientSafeError(record.error),
+      ...(retryAfterSeconds != null ? { retryAfterSeconds } : {}),
     };
   }
 

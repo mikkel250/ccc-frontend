@@ -18,7 +18,13 @@ describe("middleware", () => {
     assert.equal(response.headers.get("location"), "http://localhost:3000/login");
   });
 
-  it("allows board requests with a session cookie", () => {
+  it("redirects unauthenticated root requests to login", () => {
+    const response = middleware(new NextRequest("http://localhost:3000/"));
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get("location"), "http://localhost:3000/login");
+  });
+
+  it("continues board requests when a session cookie is present, without validating it", () => {
     const response = middleware(
       boardRequest("better-auth.session_token=signed-session-value")
     );
@@ -28,6 +34,6 @@ describe("middleware", () => {
   });
 
   it("matches /board and nested board paths", () => {
-    assert.deepEqual(config.matcher, ["/board", "/board/:path*"]);
+    assert.deepEqual(config.matcher, ["/", "/board", "/board/:path*"]);
   });
 });
