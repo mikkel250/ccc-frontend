@@ -8,6 +8,7 @@ import {
   tailorOnDemand,
 } from "../app/api/lib/ccc-tailor";
 import { handleTailorPost } from "../app/api/lib/tailor-post";
+import { formatSafeLog, type SafeLogEvent } from "../lib/safe-log";
 import {
   DEFAULT_CCC_FETCH_TIMEOUT_MS,
   GENERIC_ERROR,
@@ -121,6 +122,29 @@ describe("tailorOnDemand", () => {
       assert.equal(result.error.includes("secret"), false);
       assert.equal(result.error.toLowerCase().includes("key"), false);
     }
+  });
+
+  it("logs missing env without credentials or the job description", async () => {
+    const events: SafeLogEvent[] = [];
+    const jobDescription = "THIS_JD_MUST_NOT_BE_LOGGED";
+    const apiKey = "sk-live-must-not-be-logged";
+    const result = await tailorOnDemand(jobDescription, {
+      apiUrl: "",
+      apiKey,
+      log: (event) => events.push(event),
+      fetchImpl: async () => {
+        throw new Error("should not fetch");
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "ccc.missing_env");
+    assert.equal(events[0]?.level, "error");
+    assert.equal(events[0]?.hasApiUrl, false);
+    assert.equal(events[0]?.hasApiKey, true);
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(jobDescription), false);
+    assert.equal(serialized.includes(apiKey), false);
   });
 
   it("reads CCC_API_URL and TAILOR_API_KEY from process.env when deps omit them", async () => {
@@ -413,6 +437,28 @@ describe("tailorOnDemand", () => {
       assert.equal(result.status, 503);
       assert.equal(result.error, GENERIC_ERROR);
     }
+  });
+
+  it("logs fetch failures without the job description or API key", async () => {
+    const events: SafeLogEvent[] = [];
+    const jobDescription = "THIS_JD_MUST_NOT_BE_LOGGED";
+    const apiKey = "sk-live-must-not-be-logged";
+    const result = await tailorOnDemand(jobDescription, {
+      apiUrl: "http://ccc.test",
+      apiKey,
+      log: (event) => events.push(event),
+      fetchImpl: async () => {
+        throw new Error(`connect ECONNREFUSED Bearer ${apiKey}`);
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "ccc.fetch_failed");
+    assert.equal(events[0]?.level, "error");
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(jobDescription), false);
+    assert.equal(serialized.includes(apiKey), false);
+    assert.equal(serialized.includes("Bearer [redacted]"), true);
   });
 
   it("maps CCC fetch abort to 504", async () => {
@@ -857,5 +903,39 @@ describe("handleTailorPost", () => {
     assert.equal(response.status, 502);
     const body = (await response.json()) as { error?: string };
     assert.equal(body.error, "Unauthorized");
+  });
+
+  it("returns 500 and logs a secret-safe event when tailor throws", async () => {
+    const events: SafeLogEvent[] = [];
+    const apiKey = "sk-live-unhandled-secret";
+    const jobDescription = "THIS_JD_MUST_NOT_BE_LOGGED";
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "better-auth.session_token=abc",
+        },
+        body: JSON.stringify({ jobDescription }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
+        log: (event) => events.push(event),
+        tailor: async () => {
+          throw new Error(`Bearer ${apiKey} cookie=abc`);
+        },
+      }
+    );
+    assert.equal(response.status, 500);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, GENERIC_ERROR);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "tailor.unhandled");
+    assert.equal(events[0]?.level, "error");
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(apiKey), false);
+    assert.equal(serialized.includes(jobDescription), false);
+    assert.equal(serialized.includes("session_token=abc"), false);
   });
 });

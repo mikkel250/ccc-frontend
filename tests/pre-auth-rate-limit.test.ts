@@ -4,7 +4,7 @@ import { memoryAdapter, type MemoryDB } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth";
 
 async function signInAttempt(
-  auth: ReturnType<typeof betterAuth>,
+  auth: { handler: (request: Request) => Promise<Response> },
   xff: string
 ): Promise<Response> {
   return auth.handler(

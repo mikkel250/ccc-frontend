@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createJobAction, moveJobAction, updateJobAction } from "../app/actions/jobs";
 import { runJobAction } from "../lib/job-actions";
+import { formatSafeLog, type SafeLogEvent } from "../lib/safe-log";
 import type { JobRecord, JobStatus } from "../lib/jobs";
 import {
   consumeRateLimit,
@@ -217,5 +218,30 @@ describe("runJobAction rate limit", () => {
         process.env.RATE_LIMIT_MAX = previousTailorMax;
       }
     }
+  });
+});
+
+describe("runJobAction unexpected failures", () => {
+  it("returns a generic error and logs a secret-safe event when the action throws", async () => {
+    const events: SafeLogEvent[] = [];
+    const secret = "sk-live-job-action-secret";
+    const result = await runJobAction(
+      async () => {
+        throw new Error(`Bearer ${secret}`);
+      },
+      {
+        requireUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
+        revalidate: () => {},
+        log: (event) => events.push(event),
+      }
+    );
+    assert.deepEqual(result, { error: "Could not save. Please try again." });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "jobs.action_failed");
+    assert.equal(events[0]?.level, "error");
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(secret), false);
+    assert.equal(serialized.includes("Bearer [redacted]"), true);
   });
 });

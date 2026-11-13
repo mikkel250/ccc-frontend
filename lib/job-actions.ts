@@ -6,6 +6,7 @@ import {
   RATE_LIMIT_ERROR,
   type RateLimitResult,
 } from "./rate-limit";
+import { safeErrorFields, safeLog, type SafeLogger } from "./safe-log";
 
 type JobActionResult = { ok: true } | { ok: false; error: string };
 
@@ -13,6 +14,7 @@ export type JobActionRunDeps = {
   requireUserId?: () => Promise<string>;
   revalidate?: () => void;
   consume?: (key: string) => RateLimitResult;
+  log?: SafeLogger;
 };
 
 export async function runJobAction(
@@ -33,7 +35,12 @@ export async function runJobAction(
     }
     (deps.revalidate ?? (() => revalidatePath("/board")))();
     return;
-  } catch {
+  } catch (error) {
+    (deps.log ?? safeLog)({
+      level: "error",
+      event: "jobs.action_failed",
+      ...safeErrorFields(error),
+    });
     return { error: "Could not save. Please try again." };
   }
 }
