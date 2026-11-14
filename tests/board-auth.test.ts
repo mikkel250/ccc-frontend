@@ -12,8 +12,21 @@ import { handleTailorPost } from "../app/api/lib/tailor-post";
 import { middleware } from "../middleware";
 import { renderBoard } from "../app/board/page";
 import { runJobAction } from "../lib/job-actions";
-import { toBoardJob, type JobRecord } from "../lib/jobs";
+import { type JobRecord } from "../lib/jobs";
 import { requireSessionUserId } from "../lib/session";
+
+type RenderedBoardJob = { company: string; title: string; appliedAt: string };
+
+function jobsPassedToBoard(node: React.ReactNode): RenderedBoardJob[] {
+  if (!isValidElement(node)) {
+    return [];
+  }
+  const props = node.props as { jobs?: RenderedBoardJob[]; children?: React.ReactNode };
+  if (Array.isArray(props.jobs)) {
+    return props.jobs;
+  }
+  return React.Children.toArray(props.children).flatMap((child) => jobsPassedToBoard(child));
+}
 
 function loginRedirect(error: unknown): boolean {
   if (!error || typeof error !== "object" || !("digest" in error)) {
@@ -52,7 +65,6 @@ describe("board authentication", () => {
       createdAt: new Date("2026-09-07T12:00:00.000Z"),
       updatedAt: new Date("2026-09-07T12:00:00.000Z"),
     };
-    const mapped = toBoardJob(job);
     let listUserId: string | null = null;
     const view = await renderBoard({
       requireUserId: async () => "user-a",
@@ -66,8 +78,12 @@ describe("board authentication", () => {
     const html = renderToStaticMarkup(view);
     assert.match(html, /Application board/);
     assert.match(html, /Track roles you have applied to/);
-    assert.equal(mapped.appliedAt, "2026-09-07");
-    assert.equal(mapped.company, "Acme Corp");
+    assert.match(html, /Acme Corp/);
+    assert.match(html, /Platform Engineer/);
+    const [rendered] = jobsPassedToBoard(view);
+    assert.equal(rendered?.company, "Acme Corp");
+    assert.equal(rendered?.title, "Platform Engineer");
+    assert.equal(rendered?.appliedAt, "2026-09-07");
   });
 
   it("renders the board error state when listing jobs fails", async () => {

@@ -9,7 +9,7 @@ export type SafeLogEvent = {
 export type SafeLogger = (event: SafeLogEvent) => void;
 
 const SENSITIVE_KEY =
-  /(?:^|_)(?:api_?key|token|secret|password|authorization|cookies?|set_cookie|bearer|job_?description|reply_?text|cv|session_?id)$/;
+  /(?:^|_)(?:api_?key|token|secret|password|authorization|cookies?|set_cookie|bearer|job_?description|reply_?text|cv|session_?id|notes)$/;
 
 function normalizedLogKey(key: string): string {
   return key
@@ -45,6 +45,11 @@ export function redactText(value: string, env: LogEnv = process.env): string {
   out = out.replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token redacted]");
   out = out.replace(/\b(?:Set-Cookie|Cookie):\s*[^\r\n]+/gi, (match) =>
     match.toLowerCase().startsWith("set-cookie") ? "Set-Cookie: [redacted]" : "Cookie: [redacted]"
+  );
+  out = out.replace(/\bcookie\s*=\s*\S+/gi, "cookie=[redacted]");
+  out = out.replace(
+    /(["']?)notes\1\s*:\s*(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\\n])*`|[^\n]*)/gi,
+    "notes: [redacted]"
   );
 
   const secrets = ENV_SECRET_KEYS.map((key) => ({ key, value: env[key] }))
@@ -118,7 +123,10 @@ function sanitize(
   }
   if (value instanceof Error) {
     const fields = safeErrorFields(value, env);
-    return { name: fields.errorName, message: fields.errorMessage };
+    return {
+      name: truncate(redactText(fields.errorName, env)),
+      message: fields.errorMessage,
+    };
   }
   if (depth >= MAX_DEPTH) {
     return "[truncated]";

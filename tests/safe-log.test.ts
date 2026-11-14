@@ -151,6 +151,57 @@ describe("formatSafeLog", () => {
       message: "Bearer [redacted]",
     });
   });
+
+  it("redacts a bearer token stored on a nested error name", () => {
+    const error = new Error("upstream failed");
+    error.name = `Bearer ${env.TAILOR_API_KEY}`;
+    const line = formatSafeLog({ level: "error", event: "error-name", error }, now, env);
+    assert.equal(line.includes(env.TAILOR_API_KEY), false);
+    const body = JSON.parse(line) as { error: { name: string; message: string } };
+    assert.equal(body.error.name, "Bearer [redacted]");
+    assert.equal(body.error.message, "upstream failed");
+  });
+
+  it("omits job note text from store error messages, stacks, and notes fields", () => {
+    const note = "Follow up Friday about the unannounced offer";
+    const error = new Error(`notes: "${note}" write failed`);
+    error.stack = `Error: notes: "${note}"\n    at createJob (lib/jobs.ts:212:7)`;
+    const fields = safeErrorFields(error, env);
+    const logged = JSON.stringify(fields);
+    assert.equal(logged.includes(note), false);
+    assert.equal(logged.includes("lib/jobs.ts"), false);
+    assert.match(fields.errorMessage, /write failed/);
+
+    const splitNote = new Error(`notes: "${note}\nsecond line of the same note"`);
+    splitNote.stack = `Error: ${splitNote.message}\n    at createJob (lib/jobs.ts:212:7)`;
+    const splitFields = safeErrorFields(splitNote, env);
+    assert.equal(splitFields.errorMessage.includes("unannounced"), false);
+    assert.equal(splitFields.errorMessage.includes("second line"), false);
+    assert.equal(JSON.stringify(splitFields).includes("lib/jobs.ts"), false);
+
+    const line = formatSafeLog(
+      {
+        level: "error",
+        event: "jobs.store_failed",
+        ...fields,
+        notes: note,
+        error,
+      },
+      now,
+      env
+    );
+    assert.equal(line.includes(note), false);
+    assert.equal(line.includes("lib/jobs.ts"), false);
+    const body = JSON.parse(line) as {
+      notes: string;
+      errorMessage: string;
+      error: { message: string; stack?: string };
+    };
+    assert.equal(body.notes, "[redacted]");
+    assert.equal(body.error.stack, undefined);
+    assert.equal(body.error.message.includes(note), false);
+    assert.equal(body.errorMessage.includes(note), false);
+  });
 });
 
 describe("safeErrorFields", () => {

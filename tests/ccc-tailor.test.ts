@@ -1016,6 +1016,8 @@ describe("handleTailorPost", () => {
     const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
     assert.equal(serialized.includes(apiKey), false);
     assert.equal(serialized.includes(jobDescription), false);
-    assert.equal(serialized.includes("session_token=abc"), false);
+    assert.equal(serialized.includes("cookie=abc"), false);
+    assert.match(serialized, /Bearer \[redacted\]/);
+    assert.match(serialized, /cookie=\[redacted\]/);
   });
 });
