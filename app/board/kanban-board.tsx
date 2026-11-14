@@ -48,7 +48,10 @@ export function KanbanBoard({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function runAction(action: () => Promise<{ error?: string } | undefined>) {
+  function runAction(
+    action: () => Promise<{ error?: string } | undefined>,
+    onSuccess?: () => void
+  ) {
     startTransition(async () => {
       try {
         const result = await action();
@@ -58,6 +61,7 @@ export function KanbanBoard({
         }
         setError(null);
         setEditingId(null);
+        onSuccess?.();
       } catch {
         setError("Could not save. Please try again.");
       }
@@ -66,15 +70,19 @@ export function KanbanBoard({
 
   function submitWithFormData(
     form: HTMLFormElement,
-    action: (formData: FormData) => Promise<{ error?: string } | undefined>
+    action: (formData: FormData) => Promise<{ error?: string } | undefined>,
+    onSuccess?: () => void
   ) {
     const formData = new FormData(form);
-    runAction(() => action(formData));
+    runAction(() => action(formData), onSuccess);
   }
 
   function onCreateSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    submitWithFormData(event.currentTarget, createJob);
+    const form = event.currentTarget;
+    submitWithFormData(form, createJob, () => {
+      form.reset();
+    });
   }
 
   function onUpdateSubmit(jobId: string, event: FormEvent<HTMLFormElement>) {
