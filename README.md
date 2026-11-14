@@ -45,4 +45,4 @@ Register the first operator at `/register`, then sign in. `/`, `/board`, and `PO
 - `npm run test:db` — Postgres job-position concurrency (local Compose only; not part of `npm test`)
 - `npm run build` — `prisma generate` then production build
 
-Pull requests and pushes to `main` run lint, typecheck, and tests in GitHub Actions (`.github/workflows/ci.yml`). CI does not use GitHub secrets.
+Pull requests and pushes to `main` run Prisma schema validation, lint, typecheck, tests, and the production build in GitHub Actions (`.github/workflows/ci.yml`). CI does not use GitHub secrets or a database.

@@ -1,0 +1,13 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "better-auth"
+        versions: [">=1.8.0-0"]
+      - dependency-name: "@better-auth/memory-adapter"
+        versions: [">=1.8.0-0"]

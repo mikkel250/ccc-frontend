@@ -8,6 +8,8 @@ Do NOT maximize model capability indiscriminately.
 
 The project uses Compound Engineering's `/ce-code-review` workflow. Preserve its reviewer selection, independence, validation, deduplication, and severity rules. Your job is to run the `/ce-code-review` command, and optimize **which model performs each selected task**.
 
+This file is the only Cursor code-review model assignment. `AGENTS.md` points here and does not keep a second review table. Implementation subagent tiers stay in `AGENTS.md`. Commands that set their own `model:` frontmatter, such as `/ce-plan-classify`, keep that model. OpenRouter and Pi review outside Cursor stays in `docs/solutions/mid-tier-review-models-match-frontier-at-7x-cost.md`.
+
 ---
 
 ## Available model hierarchy
@@ -44,7 +46,9 @@ questions merely to save cost.
 
 ### Tier 1 (mid tier) — Grok 4.6
 
-Grok 4.6 is the default substantive review and implementation model in Cursor.
+Invoke this tier with the Cursor Task slug `cursor-grok-4.5-high`. That slug is this tier's Task name, not a second model. `AGENTS.md` points at this slug for implementation work that needs thinking.
+
+Grok 4.6 is the default substantive code-review model in Cursor. It is not the default for routine implementation; that mapping stays in `AGENTS.md`.
 
 Prefer Grok for:
 

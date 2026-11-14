@@ -36,6 +36,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Syntax only. Replaying migrations needs a shadow database; this job does not start Postgres.
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
       - name: Lint
         run: npm run lint
 

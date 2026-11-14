@@ -69,7 +69,7 @@ function databaseWithUniqueClaim(database: MemoryDB) {
       try {
         const result = await transaction(async (trx) => {
           const create = trx.create.bind(trx);
-          const claimAware = trx as {
+          const claimAware = trx as unknown as {
             create: (input: { model: string; data?: { id?: unknown } }) => Promise<unknown>;
           };
           claimAware.create = async (input) => {

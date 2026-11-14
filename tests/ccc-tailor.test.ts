@@ -234,9 +234,11 @@ describe("tailorOnDemand", () => {
   });
 
   it("always forwards TRUSTED_CCC_CLIENT_IP", async () => {
+    const suppliedIp = { clientIp: "203.0.113.10" };
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
       apiKey: "secret-key-value",
+      ...suppliedIp,
       fetchImpl: async (_input, init) => {
         const headers = new Headers(init?.headers);
         assert.equal(headers.get("x-forwarded-for"), TRUSTED_CCC_CLIENT_IP);

@@ -233,28 +233,22 @@ npm test
 
 In Cursor, use the Task tool / Explore agents with an explicit model override when selecting Composer: **`composer-2.5` only — never `composer-2.5-fast`** (or any other `*-fast` Composer slug), including scouts, grounding, and “cheap extraction” work. Omit `model` to inherit only when the parent session is verified Auto, standard `composer-2.5`, or Grok; if the parent is any `*-fast` Composer slug, pass `composer-2.5` explicitly.
 
-## Model Tier Assignments
+## Model routing
 
-### Mid tier — implementation, review, debugging (default)
+Cursor **code-review** models are assigned only in `.cursor/commands/ce-code-review-tiered.md`. Do not restate that table here.
 
-| Role | Model |
-|------|-------|
-| **Breadth (review/debugging)** | `deepseek/deepseek-v4-pro` |
-| **Precision (review/debugging)** | `openrouter/moonshotai/kimi-latest:max` |
-| **Second opinion** | `cursor-grok-4.5-high` or `openrouter/z-ai/glm-5.1:max` |
-
-**Cursor tier mapping:**
+Implementation subagents in Cursor use this table. For rows that say "Tier 1 slug", pass the Cursor Task slug named under Tier 1 in that command. Do not substitute a DeepSeek, Kimi, or other Grok slug.
 
 | CE Tier | Thinking needed? | Cursor Model | When |
 |---|---|---|---|
 | Low | No | `agent --model auto` | Simple fixes, formatting, boilerplate |
 | Mid | No | `agent --model composer-2.5` | Multi-file, new logic, standard refactoring |
-| Mid | Yes | `agent --model cursor-grok-4.5-high` | Debugging, test writing, design decisions |
-| High | — | `agent --model cursor-grok-4.5-high` | Architecture, tricky logic, cross-cutting concerns |
+| Mid | Yes | Tier 1 slug in `.cursor/commands/ce-code-review-tiered.md` | Debugging, test writing, design decisions |
+| High | — | Tier 1 slug in `.cursor/commands/ce-code-review-tiered.md` | Architecture, tricky logic, cross-cutting concerns |
 
 **Never use Fast Composer** for subagents, Explore, scouts, or parent-session coding in this repo.
 
-Full cost-quality data: `docs/solutions/mid-tier-review-models-match-frontier-at-7x-cost.md`
+OpenRouter and Pi review, outside Cursor, uses `docs/solutions/mid-tier-review-models-match-frontier-at-7x-cost.md`. That combo does not override the Cursor review command or this implementation table. A command file with its own `model:` frontmatter (for example `/ce-plan-classify`) keeps that model.
 
 # Review Philosophy
 
