@@ -14,6 +14,29 @@ function parsed(event: Parameters<typeof formatSafeLog>[0]) {
 }
 
 describe("formatSafeLog", () => {
+  it("redacts camelCase credential keys and keeps boolean presence flags", () => {
+    const line = formatSafeLog(
+      {
+        level: "error",
+        event: "camel-creds",
+        accessToken: "opaque-access-token-value",
+        sessionToken: "opaque-session-token-value",
+        clientSecret: "opaque-client-secret-value",
+        hasApiKey: true,
+      },
+      now,
+      env
+    );
+    assert.equal(line.includes("opaque-access-token-value"), false);
+    assert.equal(line.includes("opaque-session-token-value"), false);
+    assert.equal(line.includes("opaque-client-secret-value"), false);
+    const body = JSON.parse(line) as Record<string, unknown>;
+    assert.equal(body.accessToken, "[redacted]");
+    assert.equal(body.sessionToken, "[redacted]");
+    assert.equal(body.clientSecret, "[redacted]");
+    assert.equal(body.hasApiKey, true);
+  });
+
   it("keeps boolean env presence flags", () => {
     const body = parsed({
       level: "error",

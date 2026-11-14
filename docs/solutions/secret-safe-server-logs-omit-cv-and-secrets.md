@@ -13,7 +13,7 @@ BFF and job-action failures used to be silent. A naive `console.error(error)` or
 
 ## Solution
 
-Log one JSON object per event through `lib/safe-log.ts` (`formatSafeLog` / `safeLog`). Callers pass `level`, `event`, and non-sensitive fields (`status`, `hasApiUrl`, `errorName`). The formatter still redacts sensitive keys (`authorization`, `cookie`, `jobDescription`, `cv`, `replyText`, `sessionId`, `*token*`, `*secret*`, `*api-key*`), Bearer tokens, JWTs, and `TAILOR_API_KEY` / `BETTER_AUTH_SECRET` / `DATABASE_URL` substrings. Do not pass the request body or cookie header into the logger.
+Log one JSON object per event through `lib/safe-log.ts` (`formatSafeLog` / `safeLog`). Callers pass `level`, `event`, and non-sensitive fields (`status`, `hasApiUrl`, `errorName`). The formatter still redacts sensitive keys (`authorization`, `cookie`, `jobDescription`, `cv`, `replyText`, `sessionId`, camelCase `*Token` / `*Secret` / `*ApiKey`), Bearer tokens, JWTs, and `TAILOR_API_KEY` / `BETTER_AUTH_SECRET` / `DATABASE_URL` substrings. Boolean presence flags such as `hasApiKey` stay. Do not pass the request body, cookie header, or JSON parser messages (they can echo CCC body text) into the logger.
 
 `app/error.tsx` and `app/global-error.tsx` may show `error.digest` for support. They must not render `error.message` or `error.stack`.
 

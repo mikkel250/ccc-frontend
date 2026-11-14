@@ -533,6 +533,34 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("does not log CCC body text when JSON parsing fails", async () => {
+    const events: SafeLogEvent[] = [];
+    const marker = "Jane Doe CV THIS_MUST_NOT_BE_LOGGED";
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      log: (event) => events.push(event),
+      fetchImpl: async () =>
+        new Response(marker, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 502);
+    }
+    const parseFailed = events.filter((event) => event.event === "ccc.response_parse_failed");
+    assert.equal(parseFailed.length, 1);
+    assert.equal(parseFailed[0]?.timeout, false);
+    assert.equal(parseFailed[0]?.status, 200);
+    assert.equal(parseFailed[0]?.errorClass, "parse");
+    assert.equal("errorMessage" in (parseFailed[0] ?? {}), false);
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(parseFailed[0]!)}`;
+    assert.equal(serialized.includes(marker), false);
+    assert.equal(serialized.includes("Jane Doe"), false);
+  });
+
   it("maps malformed 200 JSON to 502", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
@@ -643,6 +671,9 @@ describe("tailorOnDemand", () => {
       events.some((event) => event.event === "ccc.response_parse_failed"),
       true
     );
+    const serialized = JSON.stringify(events);
+    assert.equal(serialized.includes("rate limited"), false);
+    assert.equal(serialized.includes("errorMessage"), false);
   });
 
   it("derives retryAfterSeconds from resetTime when Retry-After is missing", async () => {

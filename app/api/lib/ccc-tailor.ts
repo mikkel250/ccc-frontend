@@ -207,7 +207,7 @@ export async function tailorOnDemand(
       event: "ccc.response_parse_failed",
       status: response.status,
       timeout: isTimeoutOrAbortError(error),
-      ...safeErrorFields(error, logEnv(apiKey)),
+      errorClass: isTimeoutOrAbortError(error) ? "timeout" : "parse",
     });
     if (isTimeoutOrAbortError(error)) {
       return { ok: false, status: 504, error: GENERIC_ERROR };

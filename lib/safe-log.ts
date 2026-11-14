@@ -9,7 +9,18 @@ export type SafeLogEvent = {
 export type SafeLogger = (event: SafeLogEvent) => void;
 
 const SENSITIVE_KEY =
-  /^(?:.*[_-])?(?:api[_-]?key|token|secret|password|authorization|cookies?|set-cookie|bearer|job[_-]?description|reply[_-]?text|cv|sessionid)$/i;
+  /(?:^|_)(?:api_?key|token|secret|password|authorization|cookies?|set_cookie|bearer|job_?description|reply_?text|cv|session_?id)$/;
+
+function normalizedLogKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/-/g, "_")
+    .toLowerCase();
+}
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEY.test(normalizedLogKey(key));
+}
 
 const ENV_SECRET_KEYS = ["TAILOR_API_KEY", "BETTER_AUTH_SECRET", "DATABASE_URL"] as const;
 const MAX_DEPTH = 4;
@@ -86,11 +97,11 @@ function sanitize(
   env: LogEnv,
   seen: WeakSet<object>
 ): unknown {
-  if (key && SENSITIVE_KEY.test(key)) {
-    return "[redacted]";
-  }
   if (value == null || typeof value === "boolean") {
     return value;
+  }
+  if (key && isSensitiveKey(key)) {
+    return "[redacted]";
   }
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : String(value);
