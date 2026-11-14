@@ -1,24 +1,43 @@
 import { NextResponse } from "next/server";
 import { JD_MAX_CHARS, tailorOnDemand, type TailorDeps, type TailorResult } from "./ccc-tailor";
 import { readTailorJobDescription } from "./read-json-body";
+import { GENERIC_ERROR } from "../../lib/tailor-constants";
 import { getSessionUserId } from "@/lib/session";
 import {
   consumeRateLimit,
+  isRateLimitUnavailable,
   RATE_LIMIT_ERROR,
+  RATE_LIMIT_UNAVAILABLE_ERROR,
   tailorRateLimitConfig,
   type RateLimitResult,
 } from "@/lib/rate-limit";
+import { safeErrorFields, safeLog, type SafeLogger } from "@/lib/safe-log";
 
 export type TailorPostDeps = {
   getSessionUserId?: () => Promise<string | null>;
   tailor?: (jobDescription: string, deps?: TailorDeps) => Promise<TailorResult>;
   consume?: (key: string) => RateLimitResult;
+  log?: SafeLogger;
 };
 
 export async function handleTailorPost(
   request: Request,
   deps: TailorPostDeps = {}
 ) {
+  const log = deps.log ?? safeLog;
+  try {
+    return await handleTailorPostInner(request, deps);
+  } catch (error) {
+    log({
+      level: "error",
+      event: "tailor.unhandled",
+      ...safeErrorFields(error),
+    });
+    return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 });
+  }
+}
+
+async function handleTailorPostInner(request: Request, deps: TailorPostDeps) {
   const userId = await (deps.getSessionUserId ?? getSessionUserId)();
   if (!userId) {
     return NextResponse.json({ error: "Sign in required." }, { status: 401 });
@@ -44,6 +63,9 @@ export async function handleTailorPost(
     deps.consume ?? ((key: string) => consumeRateLimit(key, tailorRateLimitConfig()));
   const limited = consume(`tailor:${userId}`);
   if (!limited.ok) {
+    if (isRateLimitUnavailable(limited)) {
+      return NextResponse.json({ error: RATE_LIMIT_UNAVAILABLE_ERROR }, { status: 503 });
+    }
     return NextResponse.json(
       { error: RATE_LIMIT_ERROR },
       {

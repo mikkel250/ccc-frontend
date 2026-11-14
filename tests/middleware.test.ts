@@ -24,7 +24,7 @@ describe("middleware", () => {
     assert.equal(response.headers.get("location"), "http://localhost:3000/login");
   });
 
-  it("continues board requests when a session cookie is present, without validating it", () => {
+  it("middleware-routing smoke: continues a board request that includes a session cookie", () => {
     const response = middleware(
       boardRequest("better-auth.session_token=signed-session-value")
     );
