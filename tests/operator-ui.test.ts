@@ -236,6 +236,33 @@ describe("authentication forms", { concurrency: 1 }, () => {
     }
   });
 
+  it("hides backend details from a rejected sign-in", async () => {
+    const leak = "connect ECONNREFUSED postgresql://ccc:secret@db/ccc";
+    const view = await render(
+      createElement(LoginForm, {
+        signIn: async () => ({ error: { message: leak } }),
+      })
+    );
+    try {
+      await act(async () => {
+        typeInto(control(view.container, 'input[type="email"]'), "ada@example.com");
+        typeInto(control(view.container, 'input[type="password"]'), "test-password");
+      });
+      const form = view.container.querySelector("form");
+      assert.ok(form);
+      await submitForm(form);
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Sign in failed. Please try again."
+      );
+      assert.equal(view.container.textContent?.includes("postgresql://"), false);
+      assert.equal(view.container.textContent?.includes("secret"), false);
+      assert.deepEqual(view.calls.pushed, []);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
   it("shows a generic sign-in error when the call throws", async () => {
     const view = await render(
       createElement(LoginForm, {
@@ -327,6 +354,31 @@ describe("authentication forms", { concurrency: 1 }, () => {
       await submitForm(form);
       assert.equal(closed.container.querySelector("[role=alert]")?.textContent, "Registration is closed.");
       assert.deepEqual(closed.calls.pushed, []);
+
+      const leak = "PrismaClientInitializationError postgresql://ccc:secret@db/ccc";
+      const leaked = await render(
+        createElement(RegisterForm, {
+          signUp: async () => ({ error: { message: leak } }),
+        })
+      );
+      try {
+        await act(async () => {
+          typeInto(control(leaked.container, 'input[type="email"]'), "ada@example.com");
+          typeInto(control(leaked.container, 'input[type="password"]'), "test-password");
+        });
+        const leakedForm = leaked.container.querySelector("form");
+        assert.ok(leakedForm);
+        await submitForm(leakedForm);
+        assert.equal(
+          leaked.container.querySelector("[role=alert]")?.textContent,
+          "Registration failed. Please try again."
+        );
+        assert.equal(leaked.container.textContent?.includes("postgresql://"), false);
+        assert.equal(leaked.container.textContent?.includes("secret"), false);
+        assert.deepEqual(leaked.calls.pushed, []);
+      } finally {
+        await leaked.cleanup();
+      }
     } finally {
       await closed.cleanup();
     }
@@ -866,7 +918,9 @@ describe("sign out", { concurrency: 1 }, () => {
     const assigned: string[] = [];
     const view = await render(
       createElement(SignOutButton, {
-        signOut: async () => ({ error: { message: "Session expired" } }),
+        signOut: async () => ({
+          error: { message: "Session expired postgresql://ccc:secret@db/ccc" },
+        }),
         goToLogin: () => {
           assigned.push("/login");
         },
@@ -876,7 +930,12 @@ describe("sign out", { concurrency: 1 }, () => {
       await act(async () => {
         view.container.querySelector("button")?.click();
       });
-      assert.equal(view.container.querySelector("[role=alert]")?.textContent, "Session expired");
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Sign out failed. Please try again."
+      );
+      assert.equal(view.container.textContent?.includes("postgresql://"), false);
+      assert.equal(view.container.textContent?.includes("secret"), false);
       assert.deepEqual(assigned, []);
       assert.equal(view.container.querySelector("button")?.disabled, false);
     } finally {

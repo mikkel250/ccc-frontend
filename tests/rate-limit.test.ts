@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import {
   consumeRateLimit,
   createMemoryStore,
+  resolveAllowProcessLocalRateLimit,
   tailorRateLimitConfig,
 } from "../lib/rate-limit";
+import { register } from "../instrumentation";
 
-describe("consumeRateLimit", () => {
+describe("consumeRateLimit", { concurrency: 1 }, () => {
   it("allows distinct keys independently and denies after max in the window", () => {
     const store = createMemoryStore();
     const config = { max: 2, windowMs: 60_000 };
@@ -99,6 +101,36 @@ describe("consumeRateLimit", () => {
     }
   });
 
+  it("requires an explicit true or false process-local flag in production", () => {
+    assert.throws(
+      () => resolveAllowProcessLocalRateLimit({ NODE_ENV: "production" }),
+      /RATE_LIMIT_ALLOW_PROCESS_LOCAL must be "true" or "false" when NODE_ENV is production/
+    );
+    assert.throws(
+      () =>
+        resolveAllowProcessLocalRateLimit({
+          NODE_ENV: "production",
+          RATE_LIMIT_ALLOW_PROCESS_LOCAL: "TRUE",
+        }),
+      /RATE_LIMIT_ALLOW_PROCESS_LOCAL must be "true" or "false" when NODE_ENV is production/
+    );
+    assert.equal(
+      resolveAllowProcessLocalRateLimit({
+        NODE_ENV: "production",
+        RATE_LIMIT_ALLOW_PROCESS_LOCAL: "true",
+      }),
+      true
+    );
+    assert.equal(
+      resolveAllowProcessLocalRateLimit({
+        NODE_ENV: "production",
+        RATE_LIMIT_ALLOW_PROCESS_LOCAL: " false ",
+      }),
+      false
+    );
+    assert.equal(resolveAllowProcessLocalRateLimit({ NODE_ENV: "test" }), true);
+  });
+
   it("rejects a blank key without consuming", () => {
     const store = createMemoryStore();
     const config = { max: 1, windowMs: 60_000 };
@@ -107,5 +139,46 @@ describe("consumeRateLimit", () => {
     const denied = consumeRateLimit("  ", config, { store, now });
     assert.equal(denied.ok, false);
     assert.equal(consumeRateLimit("tailor:user-a", config, { store, now }).ok, true);
+  });
+});
+
+describe("production rate-limit startup", { concurrency: 1 }, () => {
+  it("refuses to start when production config is missing and skips the check during build", async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const previousNode = env.NODE_ENV;
+    const previousFlag = env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+    const previousPhase = env.NEXT_PHASE;
+    try {
+      env.NODE_ENV = "production";
+      delete env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+      delete env.NEXT_PHASE;
+      await assert.rejects(
+        register(),
+        /RATE_LIMIT_ALLOW_PROCESS_LOCAL must be "true" or "false" when NODE_ENV is production/
+      );
+
+      env.NEXT_PHASE = "phase-production-build";
+      await register();
+
+      delete env.NEXT_PHASE;
+      env.RATE_LIMIT_ALLOW_PROCESS_LOCAL = "false";
+      await register();
+    } finally {
+      if (previousNode === undefined) {
+        delete env.NODE_ENV;
+      } else {
+        env.NODE_ENV = previousNode;
+      }
+      if (previousFlag === undefined) {
+        delete env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+      } else {
+        env.RATE_LIMIT_ALLOW_PROCESS_LOCAL = previousFlag;
+      }
+      if (previousPhase === undefined) {
+        delete env.NEXT_PHASE;
+      } else {
+        env.NEXT_PHASE = previousPhase;
+      }
+    }
   });
 });

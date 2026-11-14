@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { clientSafeSignUpError } from "@/lib/auth-client-error";
 import { authClient } from "@/lib/auth-client";
 
 type SignUpResult = { error: { message?: string } | null };
@@ -31,7 +32,7 @@ export function RegisterForm({
         name,
       });
       if (signUpError) {
-        setError(signUpError.message || "Registration failed. Please try again.");
+        setError(clientSafeSignUpError(signUpError.message));
         return;
       }
       router.push("/board");
