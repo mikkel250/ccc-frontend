@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getPrisma } from "./prisma";
+import { safeErrorFields, safeLog } from "./safe-log";
 
 export const JOB_STATUSES = ["applied", "interview", "offer", "rejected"] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
@@ -204,7 +205,12 @@ async function withStore<T>(
 ): Promise<T | JobFailure> {
   try {
     return await run();
-  } catch {
+  } catch (caught) {
+    safeLog({
+      level: "error",
+      event: "jobs.store_failed",
+      ...safeErrorFields(caught),
+    });
     return { ok: false, code: "invalid", error };
   }
 }

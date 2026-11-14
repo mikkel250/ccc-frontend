@@ -861,6 +861,29 @@ describe("handleTailorPost", () => {
     const deniedBody = (await denied.json()) as { error?: string };
     assert.equal(deniedBody.error, "Too many requests. Please wait before trying again.");
 
+    let unavailableCalls = 0;
+    const unavailable = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Unavailable limiter JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: false, unavailable: true }),
+        tailor: async () => {
+          unavailableCalls += 1;
+          return { ok: true, cv: "nope", replyText: null };
+        },
+      }
+    );
+    assert.equal(unavailable.status, 503);
+    assert.equal(unavailable.headers.get("Retry-After"), null);
+    const unavailableBody = (await unavailable.json()) as { error?: string };
+    assert.equal(unavailableBody.error, "Rate limiting is unavailable. Please try again later.");
+    assert.notEqual(unavailableBody.error, deniedBody.error);
+    assert.equal(unavailableCalls, 0);
+
     const otherUser = await handleTailorPost(
       new Request("http://localhost/api/tailor", {
         method: "POST",

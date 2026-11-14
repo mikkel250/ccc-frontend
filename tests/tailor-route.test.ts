@@ -182,8 +182,14 @@ describe("readTailorJobDescription", () => {
     }
   });
 
-  it("returns 400 for invalid UTF-8 without accepting replacement characters", async () => {
-    const invalidUtf8 = Uint8Array.from([0xff, 0xfe, 0x7b, 0x22, 0x7d]);
+  it("returns 400 for invalid UTF-8 that would stay valid JSON after replacement", async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode('{"jobDescription":"hello');
+    const suffix = encoder.encode('"}');
+    const invalidUtf8 = new Uint8Array(prefix.length + 1 + suffix.length);
+    invalidUtf8.set(prefix, 0);
+    invalidUtf8[prefix.length] = 0xff;
+    invalidUtf8.set(suffix, prefix.length + 1);
     const result = await readTailorJobDescription(
       streamingJsonRequest(byteStream(invalidUtf8)),
       1024,
@@ -193,6 +199,19 @@ describe("readTailorJobDescription", () => {
     if (!result.ok) {
       assert.equal(result.status, 400);
       assert.equal(result.error, INVALID_JSON);
+    }
+  });
+
+  it("accepts well-formed UTF-8 in the job description", async () => {
+    const cafe = new TextEncoder().encode('{"jobDescription":"café"}');
+    const result = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(cafe)),
+      1024,
+      5_000
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.jobDescription, "café");
     }
   });
 

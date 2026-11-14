@@ -1,4 +1,6 @@
 export const RATE_LIMIT_ERROR = "Too many requests. Please wait before trying again.";
+export const RATE_LIMIT_UNAVAILABLE_ERROR =
+  "Rate limiting is unavailable. Please try again later.";
 
 export type RateLimitSuccess = { ok: true };
 
@@ -7,7 +9,18 @@ export type RateLimitFailure = {
   retryAfterSeconds: number;
 };
 
-export type RateLimitResult = RateLimitSuccess | RateLimitFailure;
+export type RateLimitUnavailable = {
+  ok: false;
+  unavailable: true;
+};
+
+export type RateLimitResult = RateLimitSuccess | RateLimitFailure | RateLimitUnavailable;
+
+export function isRateLimitUnavailable(
+  result: RateLimitResult
+): result is RateLimitUnavailable {
+  return result.ok === false && "unavailable" in result;
+}
 
 export type RateLimitConfig = {
   max: number;
@@ -82,7 +95,7 @@ export function consumeRateLimit(
   const allowProcessLocal = deps.allowProcessLocal ?? processLocalStoreAllowed();
   const store = deps.store ?? (allowProcessLocal ? defaultStore : undefined);
   if (!store) {
-    return { ok: false, retryAfterSeconds: 60 };
+    return { ok: false, unavailable: true };
   }
   const now = deps.now ?? Date.now();
   const windowStart = now - config.windowMs;

@@ -56,6 +56,7 @@ export function redactText(value: string, env: LogEnv = process.env): string {
   for (const secret of secrets) {
     out = out.split(secret.value).join(`[${secret.key} redacted]`);
   }
+  out = out.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/]*@/gi, "$1[redacted]@");
   return out;
 }
 

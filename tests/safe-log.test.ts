@@ -171,4 +171,16 @@ describe("safeErrorFields", () => {
     assert.equal(fromNull.errorName, "Error");
     assert.equal(fromNull.errorMessage, "unknown");
   });
+
+  it("redacts URL userinfo from a fetch credential error", () => {
+    const message =
+      "Request cannot be constructed from a URL that includes credentials: https://user:s3cret@example.com/api/tailor-cv";
+    const fields = safeErrorFields(new TypeError(message), env);
+    assert.equal(fields.errorMessage.includes("s3cret"), false);
+    assert.equal(fields.errorMessage.includes("user:"), false);
+    assert.match(fields.errorMessage, /https:\/\/\[redacted\]@example\.com\/api\/tailor-cv/);
+
+    const withPort = safeErrorFields(new Error("fetch failed http://127.0.0.1:3001/api/tailor-cv"), env);
+    assert.equal(withPort.errorMessage, "fetch failed http://127.0.0.1:3001/api/tailor-cv");
+  });
 });

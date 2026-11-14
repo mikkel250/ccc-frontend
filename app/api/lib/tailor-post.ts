@@ -5,7 +5,9 @@ import { GENERIC_ERROR } from "../../lib/tailor-constants";
 import { getSessionUserId } from "@/lib/session";
 import {
   consumeRateLimit,
+  isRateLimitUnavailable,
   RATE_LIMIT_ERROR,
+  RATE_LIMIT_UNAVAILABLE_ERROR,
   tailorRateLimitConfig,
   type RateLimitResult,
 } from "@/lib/rate-limit";
@@ -61,6 +63,9 @@ async function handleTailorPostInner(request: Request, deps: TailorPostDeps) {
     deps.consume ?? ((key: string) => consumeRateLimit(key, tailorRateLimitConfig()));
   const limited = consume(`tailor:${userId}`);
   if (!limited.ok) {
+    if (isRateLimitUnavailable(limited)) {
+      return NextResponse.json({ error: RATE_LIMIT_UNAVAILABLE_ERROR }, { status: 503 });
+    }
     return NextResponse.json(
       { error: RATE_LIMIT_ERROR },
       {
