@@ -4,7 +4,7 @@ import { Window } from "happy-dom";
 import type { ReactElement, ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import type { BoardJob, JobStatus } from "../lib/jobs";
-import { TIMEOUT_ERROR } from "../app/lib/tailor-constants";
+import { CLIENT_FETCH_TIMEOUT_MS, TIMEOUT_ERROR } from "../app/lib/tailor-constants";
 
 const dom = new Window({ url: "http://127.0.0.1:3000/" });
 const domGlobals = [
@@ -606,6 +606,57 @@ describe("tailor form", { concurrency: 1 }, () => {
       assert.equal(document.querySelector("[role=alert]"), null);
     } finally {
       held.restore();
+    }
+  });
+
+  it("aborts a stalled tailor request when the client timeout fires", async () => {
+    const held = holdFetches();
+    const view = await render(createElement(TailorForm));
+    const originalSetTimeout = window.setTimeout.bind(window);
+    const originalClearTimeout = window.clearTimeout.bind(window);
+    const armed: { id: number; delay: number; fire: () => void }[] = [];
+    let nextId = 1;
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (delay === CLIENT_FETCH_TIMEOUT_MS && typeof handler === "function") {
+        const id = nextId++;
+        armed.push({
+          id,
+          delay,
+          fire() {
+            handler(...args);
+          },
+        });
+        return id;
+      }
+      return originalSetTimeout(handler as never, delay as never, ...(args as never[]));
+    }) as typeof window.setTimeout;
+    window.clearTimeout = ((id?: number) => {
+      const index = armed.findIndex((timer) => timer.id === id);
+      if (index >= 0) {
+        armed.splice(index, 1);
+        return;
+      }
+      originalClearTimeout(id as never);
+    }) as typeof window.clearTimeout;
+    try {
+      await submitJob(view.container, "Senior engineer");
+      assert.equal(armed.length, 1);
+      assert.equal(armed[0]?.delay, CLIENT_FETCH_TIMEOUT_MS);
+      assert.equal(held.calls[0]?.signal?.aborted, false);
+      const pending = armed[0];
+      assert.ok(pending);
+      await act(async () => {
+        pending.fire();
+        await Promise.resolve();
+      });
+      assert.equal(held.calls[0]?.signal?.aborted, true);
+      assert.equal(view.container.querySelector("[role=alert]")?.textContent, TIMEOUT_ERROR);
+      assert.equal(view.container.querySelector("button")?.textContent, "Tailor CV");
+    } finally {
+      window.setTimeout = originalSetTimeout as typeof window.setTimeout;
+      window.clearTimeout = originalClearTimeout as typeof window.clearTimeout;
+      held.restore();
+      await view.cleanup();
     }
   });
 
