@@ -1,4 +1,4 @@
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createJob,
@@ -186,11 +186,21 @@ describe("jobs isolation", () => {
 
     assert.equal(results.every((result) => result.ok), true);
     assert.notEqual(conflicts.count, 0);
+    const userRows = db.rows.filter((job) => job.userId === "user-a");
+    const applied = userRows
+      .filter((job) => job.status === "applied")
+      .sort((left, right) => left.position - right.position);
+    assert.equal(userRows.length, 2);
     assert.deepEqual(
-      db.rows
-        .filter((job) => job.userId === "user-a" && job.status === "applied")
-        .sort((left, right) => left.position - right.position)
-        .map((job) => job.position),
+      applied.map((job) => job.company).sort(),
+      ["Alpha", "Beta"]
+    );
+    assert.deepEqual(
+      applied.map((job) => job.id).sort(),
+      results.flatMap((result) => (result.ok ? [result.job.id] : [])).sort()
+    );
+    assert.deepEqual(
+      applied.map((job) => job.position),
       [0, 1]
     );
   });
@@ -467,25 +477,15 @@ describe("jobs isolation", () => {
     assert.equal(boardJob.appliedAt, "2026-09-07");
   });
 
-  it("uses the UTC calendar date near midnight when TZ is not UTC", () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = "America/Los_Angeles";
-    try {
-      const boardJob = toBoardJob(
-        seedJob({
-          id: "a1",
-          userId: "user-a",
-          appliedAt: new Date("2026-09-07T00:30:00.000Z"),
-        })
-      );
-      assert.equal(boardJob.appliedAt, "2026-09-07");
-    } finally {
-      if (previousTz === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = previousTz;
-      }
-    }
+  it("formats an instant just after UTC midnight as that UTC calendar date", () => {
+    const boardJob = toBoardJob(
+      seedJob({
+        id: "a1",
+        userId: "user-a",
+        appliedAt: new Date("2026-09-07T00:30:00.000Z"),
+      })
+    );
+    assert.equal(boardJob.appliedAt, "2026-09-07");
   });
 
   it("deletes the caller's own job", async () => {
@@ -546,24 +546,39 @@ describe("jobs isolation", () => {
     }
   });
 
-  it("defaults omitted appliedAt to the local calendar date at UTC midnight", async () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = "America/Los_Angeles";
-    mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-15T07:30:00.000Z") });
-    try {
-      const db = createMemoryStore();
-      const created = await createJob("user-a", { company: "Acme", title: "Eng" }, { db });
-      assert.equal(created.ok, true);
-      if (created.ok) {
-        assert.equal(created.job.appliedAt.toISOString(), "2026-01-14T00:00:00.000Z");
+  it("defaults omitted appliedAt to the server calendar date at UTC midnight", async () => {
+    const now = new Date("2026-07-01T06:30:00.000Z");
+    const day = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+    const db = createMemoryStore();
+    const created = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng" },
+      { db, now: () => now }
+    );
+    assert.equal(created.ok, true);
+    if (created.ok) {
+      assert.equal(created.job.appliedAt.toISOString(), `${day}T00:00:00.000Z`);
+    }
+  });
+
+  it("defaults omitted appliedAt to the given time zone's calendar date at UTC midnight", async () => {
+    const db = createMemoryStore();
+    const created = await createJob(
+      "user-a",
+      { company: "Acme", title: "Eng" },
+      {
+        db,
+        now: () => new Date("2026-01-15T12:00:00.000Z"),
+        timeZone: "Pacific/Auckland",
       }
-    } finally {
-      mock.timers.reset();
-      if (previousTz === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = previousTz;
-      }
+    );
+    assert.equal(created.ok, true);
+    if (created.ok) {
+      assert.equal(created.job.appliedAt.toISOString(), "2026-01-16T00:00:00.000Z");
     }
   });
 
@@ -598,22 +613,35 @@ describe("jobs isolation", () => {
       seedJob({ id: "i1", userId: "user-a", status: "interview", position: 0 }),
     ]);
     const runTransaction = db.$transaction.bind(db);
-    db.$transaction = async (run) => {
-      const row = db.rows.find((job) => job.id === "a1");
-      if (row?.status === "applied") {
-        row.status = "interview";
-        row.position = 1;
-      }
-      return runTransaction(run);
-    };
+    db.$transaction = async (run) =>
+      runTransaction(async (tx) => {
+        const row = db.rows.find((job) => job.id === "a1");
+        if (row?.status === "applied") {
+          // 2 is this row's position during the transaction. The slot from the
+          // pre-transaction column is 1, and max+1 after this write is 3.
+          row.status = "interview";
+          row.position = 2;
+        }
+        return run(tx);
+      });
 
     const result = await updateJob("user-a", "a1", { status: "interview" }, { db });
 
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.job.status, "interview");
-      assert.equal(result.job.position, 1);
+      assert.equal(result.job.position, 2);
     }
+    assert.deepEqual(
+      db.rows
+        .filter((job) => job.userId === "user-a" && job.status === "interview")
+        .map((job) => ({ id: job.id, position: job.position }))
+        .sort((left, right) => left.position - right.position),
+      [
+        { id: "i1", position: 0 },
+        { id: "a1", position: 2 },
+      ]
+    );
   });
 
   it("moves a card to a new column at the next position", async () => {
