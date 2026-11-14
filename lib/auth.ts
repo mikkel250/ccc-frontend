@@ -2,14 +2,18 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { prisma } from "./prisma";
+import {
+  resolveBetterAuthTrustedOrigins,
+  resolveBetterAuthUrl,
+} from "./auth-config";
 import { firstOperatorRegistration } from "./registration";
 
-const origin = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:3000";
+const origin = resolveBetterAuthUrl();
 
 export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: origin,
-  trustedOrigins: [origin],
+  trustedOrigins: resolveBetterAuthTrustedOrigins(origin),
   database: prismaAdapter(prisma, {
     provider: "postgresql",
     transaction: true,

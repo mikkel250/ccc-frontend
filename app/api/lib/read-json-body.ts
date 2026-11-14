@@ -41,6 +41,16 @@ function bodyDeadline(timeoutMs: number): { promise: Promise<never>; clear: () =
   };
 }
 
+const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+function decodeUtf8Strict(bytes: Uint8Array): string | null {
+  try {
+    return strictUtf8Decoder.decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 function contentLengthTooLarge(request: Request, maxBytes: number): boolean {
   const header = request.headers.get("content-length");
   if (header === null) {
@@ -99,7 +109,11 @@ async function readTextCapped(
       return { ok: false, tooLarge: false, timedOut: false };
     }
 
-    return { ok: true, text: Buffer.concat(chunks).toString("utf8") };
+    const text = decodeUtf8Strict(Buffer.concat(chunks));
+    if (text === null) {
+      return { ok: false, tooLarge: false, timedOut: false };
+    }
+    return { ok: true, text };
   } finally {
     deadline.clear();
   }

@@ -182,6 +182,20 @@ describe("readTailorJobDescription", () => {
     }
   });
 
+  it("returns 400 for invalid UTF-8 without accepting replacement characters", async () => {
+    const invalidUtf8 = Uint8Array.from([0xff, 0xfe, 0x7b, 0x22, 0x7d]);
+    const result = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(invalidUtf8)),
+      1024,
+      5_000
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 400);
+      assert.equal(result.error, INVALID_JSON);
+    }
+  });
+
   it("returns an empty job description when the request has no body", async () => {
     const request = new Request("http://127.0.0.1/api/tailor", { method: "POST" });
     const result = await readTailorJobDescription(request, 1024, 30);
@@ -240,6 +254,32 @@ describe("POST /api/tailor", () => {
     } finally {
       restore();
     }
+  });
+
+  it("returns 400 when the body stream errors without consuming rate limit or calling CCC", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        return Promise.reject(new Error("stream read failed"));
+      },
+    });
+    let consumed = 0;
+    let called = false;
+    const response = await handleTailorPost(streamingJsonRequest(stream), {
+      ...signedIn,
+      consume: () => {
+        consumed += 1;
+        return { ok: true as const };
+      },
+      tailor: async () => {
+        called = true;
+        return { ok: true, cv: "UEsDbA==", replyText: null };
+      },
+    });
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, INVALID_JSON);
+    assert.equal(consumed, 0);
+    assert.equal(called, false);
   });
 
   it("returns 400 for malformed JSON", async () => {

@@ -3,10 +3,16 @@ import assert from "node:assert/strict";
 import { memoryAdapter, type MemoryDB } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth";
 import { NextRequest } from "next/server";
+import React, { isValidElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+type GlobalWithReact = typeof globalThis & { React?: typeof React };
+(globalThis as GlobalWithReact).React = React;
 import { handleTailorPost } from "../app/api/lib/tailor-post";
 import { middleware } from "../middleware";
 import { renderBoard } from "../app/board/page";
 import { runJobAction } from "../lib/job-actions";
+import { toBoardJob, type JobRecord } from "../lib/jobs";
 import { requireSessionUserId } from "../lib/session";
 
 function loginRedirect(error: unknown): boolean {
@@ -30,6 +36,48 @@ describe("board authentication", () => {
     );
     assert.equal(signedIn.status, 200);
     assert.equal(signedIn.headers.get("location"), null);
+  });
+
+  it("renders the board with mapped jobs for a signed-in user", async () => {
+    const job: JobRecord = {
+      id: "job-1",
+      userId: "user-a",
+      company: "Acme Corp",
+      title: "Platform Engineer",
+      url: null,
+      notes: null,
+      status: "applied",
+      position: 0,
+      appliedAt: new Date("2026-09-07T15:30:00.000Z"),
+      createdAt: new Date("2026-09-07T12:00:00.000Z"),
+      updatedAt: new Date("2026-09-07T12:00:00.000Z"),
+    };
+    const mapped = toBoardJob(job);
+    let listUserId: string | null = null;
+    const view = await renderBoard({
+      requireUserId: async () => "user-a",
+      list: async (userId) => {
+        listUserId = userId;
+        return { ok: true, jobs: [job] };
+      },
+    });
+    assert.equal(listUserId, "user-a");
+    assert.equal(isValidElement(view), true);
+    const html = renderToStaticMarkup(view);
+    assert.match(html, /Application board/);
+    assert.match(html, /Track roles you have applied to/);
+    assert.equal(mapped.appliedAt, "2026-09-07");
+    assert.equal(mapped.company, "Acme Corp");
+  });
+
+  it("renders the board error state when listing jobs fails", async () => {
+    const view = await renderBoard({
+      requireUserId: async () => "user-a",
+      list: async () => ({ ok: false, error: "database unavailable" }),
+    });
+    const html = renderToStaticMarkup(view);
+    assert.match(html, /Could not load applications/);
+    assert.equal(html.includes('role="alert"'), true);
   });
 
   it("redirects the board page before listing jobs", async () => {

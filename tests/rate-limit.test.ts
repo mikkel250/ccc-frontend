@@ -53,6 +53,15 @@ describe("consumeRateLimit", () => {
     }
   });
 
+  it("fails closed when process-local storage is disabled", () => {
+    const config = { max: 1, windowMs: 60_000 };
+    const denied = consumeRateLimit("tailor:user-a", config, { allowProcessLocal: false });
+    assert.equal(denied.ok, false);
+    if (!denied.ok) {
+      assert.equal(denied.retryAfterSeconds, 60);
+    }
+  });
+
   it("rejects a blank key without consuming", () => {
     const store = createMemoryStore();
     const config = { max: 1, windowMs: 60_000 };
