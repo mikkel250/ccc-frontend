@@ -31,10 +31,11 @@ describe("CI workflow", () => {
     assert.match(yaml, /run:\s*npm run typecheck\b/);
     assert.match(yaml, /run:\s*npm test\b/);
     assert.match(yaml, /run:\s*npm run build\b/);
+    assert.match(yaml, /BETTER_AUTH_URL:\s*http:\/\/127\.0\.0\.1:3000/);
+    assert.match(yaml, /BETTER_AUTH_SECRET:\s*ci-build-only-not-a-real-secret-0001/);
 
     assert.doesNotMatch(yaml, /\$\{\{\s*secrets\./);
     assert.doesNotMatch(yaml, /TAILOR_API_KEY/);
-    assert.doesNotMatch(yaml, /BETTER_AUTH_SECRET/);
   });
 
   it("sets a loopback DATABASE_URL so prisma generate does not need secrets", () => {

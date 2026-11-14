@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type FormEvent } from "react";
 import {
   createJobAction,
   deleteJobAction,
@@ -48,7 +48,10 @@ export function KanbanBoard({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function runAction(action: () => Promise<{ error?: string } | undefined>) {
+  function runAction(
+    action: () => Promise<{ error?: string } | undefined>,
+    onSuccess?: () => void
+  ) {
     startTransition(async () => {
       try {
         const result = await action();
@@ -58,9 +61,36 @@ export function KanbanBoard({
         }
         setError(null);
         setEditingId(null);
+        onSuccess?.();
       } catch {
         setError("Could not save. Please try again.");
       }
+    });
+  }
+
+  function submitWithFormData(
+    form: HTMLFormElement,
+    action: (formData: FormData) => Promise<{ error?: string } | undefined>,
+    onSuccess?: () => void
+  ) {
+    const formData = new FormData(form);
+    runAction(() => action(formData), onSuccess);
+  }
+
+  function onCreateSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    submitWithFormData(form, createJob, () => {
+      form.reset();
+    });
+  }
+
+  function onUpdateSubmit(jobId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    submitWithFormData(form, async (formData) => {
+      formData.set("id", jobId);
+      return updateJob(formData);
     });
   }
 
@@ -68,9 +98,7 @@ export function KanbanBoard({
     <div className="flex flex-col gap-6">
       <form
         className="grid gap-3 rounded-md border border-neutral-200 p-4 dark:border-neutral-800 md:grid-cols-2"
-        action={(formData) => {
-          runAction(() => createJob(formData));
-        }}
+        onSubmit={onCreateSubmit}
       >
         <h2 className="text-sm font-semibold md:col-span-2">Add application</h2>
         <label className="flex flex-col gap-1 text-sm font-medium">
@@ -185,10 +213,7 @@ export function KanbanBoard({
                     {editingId === job.id ? (
                       <form
                         className="flex flex-col gap-2"
-                        action={(formData) => {
-                          formData.set("id", job.id);
-                          runAction(() => updateJob(formData));
-                        }}
+                        onSubmit={(event) => onUpdateSubmit(job.id, event)}
                       >
                         <input name="company" defaultValue={job.company} required maxLength={200} disabled={pending} className={inputClass} />
                         <input name="title" defaultValue={job.title} required maxLength={200} disabled={pending} className={inputClass} />

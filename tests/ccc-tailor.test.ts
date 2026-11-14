@@ -8,6 +8,7 @@ import {
   tailorOnDemand,
 } from "../app/api/lib/ccc-tailor";
 import { handleTailorPost } from "../app/api/lib/tailor-post";
+import { formatSafeLog, type SafeLogEvent } from "../lib/safe-log";
 import {
   DEFAULT_CCC_FETCH_TIMEOUT_MS,
   GENERIC_ERROR,
@@ -121,6 +122,29 @@ describe("tailorOnDemand", () => {
       assert.equal(result.error.includes("secret"), false);
       assert.equal(result.error.toLowerCase().includes("key"), false);
     }
+  });
+
+  it("logs missing env without credentials or the job description", async () => {
+    const events: SafeLogEvent[] = [];
+    const jobDescription = "THIS_JD_MUST_NOT_BE_LOGGED";
+    const apiKey = "sk-live-must-not-be-logged";
+    const result = await tailorOnDemand(jobDescription, {
+      apiUrl: "",
+      apiKey,
+      log: (event) => events.push(event),
+      fetchImpl: async () => {
+        throw new Error("should not fetch");
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "ccc.missing_env");
+    assert.equal(events[0]?.level, "error");
+    assert.equal(events[0]?.hasApiUrl, false);
+    assert.equal(events[0]?.hasApiKey, true);
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(jobDescription), false);
+    assert.equal(serialized.includes(apiKey), false);
   });
 
   it("reads CCC_API_URL and TAILOR_API_KEY from process.env when deps omit them", async () => {
@@ -417,6 +441,28 @@ describe("tailorOnDemand", () => {
     }
   });
 
+  it("logs fetch failures without the job description or API key", async () => {
+    const events: SafeLogEvent[] = [];
+    const jobDescription = "THIS_JD_MUST_NOT_BE_LOGGED";
+    const apiKey = "sk-live-must-not-be-logged";
+    const result = await tailorOnDemand(jobDescription, {
+      apiUrl: "http://ccc.test",
+      apiKey,
+      log: (event) => events.push(event),
+      fetchImpl: async () => {
+        throw new Error(`connect ECONNREFUSED Bearer ${apiKey}`);
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "ccc.fetch_failed");
+    assert.equal(events[0]?.level, "error");
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(jobDescription), false);
+    assert.equal(serialized.includes(apiKey), false);
+    assert.equal(serialized.includes("Bearer [redacted]"), true);
+  });
+
   it("maps CCC fetch abort to 504", async () => {
     const result = await tailorOnDemand("Senior engineer JD", {
       apiUrl: "http://ccc.test",
@@ -487,6 +533,34 @@ describe("tailorOnDemand", () => {
       assert.equal(result.status, 504);
       assert.equal(result.error, GENERIC_ERROR);
     }
+  });
+
+  it("does not log CCC body text when JSON parsing fails", async () => {
+    const events: SafeLogEvent[] = [];
+    const marker = "Jane Doe CV THIS_MUST_NOT_BE_LOGGED";
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret-key-value",
+      log: (event) => events.push(event),
+      fetchImpl: async () =>
+        new Response(marker, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 502);
+    }
+    const parseFailed = events.filter((event) => event.event === "ccc.response_parse_failed");
+    assert.equal(parseFailed.length, 1);
+    assert.equal(parseFailed[0]?.timeout, false);
+    assert.equal(parseFailed[0]?.status, 200);
+    assert.equal(parseFailed[0]?.errorClass, "parse");
+    assert.equal("errorMessage" in (parseFailed[0] ?? {}), false);
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(parseFailed[0]!)}`;
+    assert.equal(serialized.includes(marker), false);
+    assert.equal(serialized.includes("Jane Doe"), false);
   });
 
   it("maps malformed 200 JSON to 502", async () => {
@@ -575,6 +649,33 @@ describe("tailorOnDemand", () => {
       assert.equal(result.status, 429);
       assert.equal(result.retryAfterSeconds, 45);
     }
+  });
+
+  it("keeps Retry-After when a CCC 429 body is not JSON", async () => {
+    const events: SafeLogEvent[] = [];
+    const result = await tailorOnDemand("Senior engineer JD", {
+      apiUrl: "http://ccc.test",
+      apiKey: "secret",
+      log: (event) => events.push(event),
+      fetchImpl: async () =>
+        new Response("rate limited", {
+          status: 429,
+          headers: { "Retry-After": "45", "content-type": "text/plain" },
+        }),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 429);
+      assert.equal(result.retryAfterSeconds, 45);
+      assert.equal(result.error, GENERIC_ERROR);
+    }
+    assert.equal(
+      events.some((event) => event.event === "ccc.response_parse_failed"),
+      true
+    );
+    const serialized = JSON.stringify(events);
+    assert.equal(serialized.includes("rate limited"), false);
+    assert.equal(serialized.includes("errorMessage"), false);
   });
 
   it("derives retryAfterSeconds from resetTime when Retry-After is missing", async () => {
@@ -760,6 +861,29 @@ describe("handleTailorPost", () => {
     const deniedBody = (await denied.json()) as { error?: string };
     assert.equal(deniedBody.error, "Too many requests. Please wait before trying again.");
 
+    let unavailableCalls = 0;
+    const unavailable = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: "Unavailable limiter JD" }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: false, unavailable: true }),
+        tailor: async () => {
+          unavailableCalls += 1;
+          return { ok: true, cv: "nope", replyText: null };
+        },
+      }
+    );
+    assert.equal(unavailable.status, 503);
+    assert.equal(unavailable.headers.get("Retry-After"), null);
+    const unavailableBody = (await unavailable.json()) as { error?: string };
+    assert.equal(unavailableBody.error, "Rate limiting is unavailable. Please try again later.");
+    assert.notEqual(unavailableBody.error, deniedBody.error);
+    assert.equal(unavailableCalls, 0);
+
     const otherUser = await handleTailorPost(
       new Request("http://localhost/api/tailor", {
         method: "POST",
@@ -859,5 +983,41 @@ describe("handleTailorPost", () => {
     assert.equal(response.status, 502);
     const body = (await response.json()) as { error?: string };
     assert.equal(body.error, "Unauthorized");
+  });
+
+  it("returns 500 and logs a secret-safe event when tailor throws", async () => {
+    const events: SafeLogEvent[] = [];
+    const apiKey = "sk-live-unhandled-secret";
+    const jobDescription = "THIS_JD_MUST_NOT_BE_LOGGED";
+    const response = await handleTailorPost(
+      new Request("http://localhost/api/tailor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          cookie: "better-auth.session_token=abc",
+        },
+        body: JSON.stringify({ jobDescription }),
+      }),
+      {
+        getSessionUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
+        log: (event) => events.push(event),
+        tailor: async () => {
+          throw new Error(`Bearer ${apiKey} cookie=abc`);
+        },
+      }
+    );
+    assert.equal(response.status, 500);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, GENERIC_ERROR);
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "tailor.unhandled");
+    assert.equal(events[0]?.level, "error");
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(apiKey), false);
+    assert.equal(serialized.includes(jobDescription), false);
+    assert.equal(serialized.includes("cookie=abc"), false);
+    assert.match(serialized, /Bearer \[redacted\]/);
+    assert.match(serialized, /cookie=\[redacted\]/);
   });
 });

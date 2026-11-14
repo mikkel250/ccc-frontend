@@ -50,4 +50,9 @@ jobs:
         run: npm test
 
       - name: Build
+        env:
+          BETTER_AUTH_URL: http://127.0.0.1:3000
+          # Placeholder only. `next build` loads lib/auth.ts with NODE_ENV=production,
+          # and Better Auth rejects its built-in default secret. This job does not deploy.
+          BETTER_AUTH_SECRET: ci-build-only-not-a-real-secret-0001
         run: npm run build
