@@ -31,6 +31,7 @@ describe("CI workflow", () => {
     assert.match(yaml, /run:\s*npm run typecheck\b/);
     assert.match(yaml, /run:\s*npm test\b/);
     assert.match(yaml, /run:\s*npm run build\b/);
+    assert.match(yaml, /BETTER_AUTH_URL:\s*http:\/\/127\.0\.0\.1:3000/);
 
     assert.doesNotMatch(yaml, /\$\{\{\s*secrets\./);
     assert.doesNotMatch(yaml, /TAILOR_API_KEY/);

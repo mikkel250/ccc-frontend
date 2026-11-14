@@ -16,7 +16,7 @@ describe("consumeRateLimit", () => {
     assert.equal(consumeRateLimit("tailor:user-a", config, { store, now }).ok, true);
     const denied = consumeRateLimit("tailor:user-a", config, { store, now });
     assert.equal(denied.ok, false);
-    if (!denied.ok) {
+    if (!denied.ok && !("unavailable" in denied)) {
       assert.equal(denied.retryAfterSeconds, 60);
     }
     assert.equal(consumeRateLimit("tailor:user-b", config, { store, now }).ok, true);
@@ -49,6 +49,52 @@ describe("consumeRateLimit", () => {
         } else {
           process.env[key] = value;
         }
+      }
+    }
+  });
+
+  it("fails closed without a quota delay when process-local storage is disabled", () => {
+    const config = { max: 1, windowMs: 60_000 };
+    const denied = consumeRateLimit("tailor:user-a", config, { allowProcessLocal: false });
+    assert.equal(denied.ok, false);
+    assert.equal("unavailable" in denied && denied.unavailable, true);
+    assert.equal("retryAfterSeconds" in denied, false);
+  });
+
+  it("reads NODE_ENV and RATE_LIMIT_ALLOW_PROCESS_LOCAL when no override is passed", () => {
+    const config = { max: 1, windowMs: 60_000 };
+    const env = process.env as Record<string, string | undefined>;
+    const previousNode = env.NODE_ENV;
+    const previousFlag = env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+    const key = `env-limit-${process.hrtime.bigint()}`;
+    try {
+      env.NODE_ENV = "production";
+      delete env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+      const unset = consumeRateLimit(key, config);
+      assert.equal(unset.ok, false);
+      assert.equal("unavailable" in unset && unset.unavailable, true);
+
+      env.RATE_LIMIT_ALLOW_PROCESS_LOCAL = "TRUE";
+      const wrongCase = consumeRateLimit(`${key}-case`, config);
+      assert.equal(wrongCase.ok, false);
+      assert.equal("unavailable" in wrongCase && wrongCase.unavailable, true);
+
+      env.RATE_LIMIT_ALLOW_PROCESS_LOCAL = "true";
+      assert.equal(consumeRateLimit(`${key}-allow`, config).ok, true);
+
+      env.NODE_ENV = "test";
+      delete env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+      assert.equal(consumeRateLimit(`${key}-dev`, config).ok, true);
+    } finally {
+      if (previousNode === undefined) {
+        delete env.NODE_ENV;
+      } else {
+        env.NODE_ENV = previousNode;
+      }
+      if (previousFlag === undefined) {
+        delete env.RATE_LIMIT_ALLOW_PROCESS_LOCAL;
+      } else {
+        env.RATE_LIMIT_ALLOW_PROCESS_LOCAL = previousFlag;
       }
     }
   });

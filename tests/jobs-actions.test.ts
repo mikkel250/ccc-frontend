@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createJobAction, moveJobAction, updateJobAction } from "../app/actions/jobs";
 import { runJobAction } from "../lib/job-actions";
+import { formatSafeLog, type SafeLogEvent } from "../lib/safe-log";
 import type { JobRecord, JobStatus } from "../lib/jobs";
 import {
   consumeRateLimit,
@@ -217,5 +218,79 @@ describe("runJobAction rate limit", () => {
         process.env.RATE_LIMIT_MAX = previousTailorMax;
       }
     }
+  });
+});
+
+describe("runJobAction unexpected failures", () => {
+  it("returns the unavailable string without running when the limiter has no store", async () => {
+    let ran = 0;
+    const result = await runJobAction(
+      async () => {
+        ran += 1;
+        return { ok: true };
+      },
+      {
+        requireUserId: async () => "user-a",
+        consume: () => ({ ok: false, unavailable: true }),
+        revalidate: () => {},
+      }
+    );
+    assert.deepEqual(result, { error: "Rate limiting is unavailable. Please try again later." });
+    assert.equal(ran, 0);
+  });
+
+  it("logs a store failure and still returns the generic save error", async () => {
+    const db = createMemoryStore();
+    db.$transaction = async () => {
+      throw new Error("database unavailable");
+    };
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (line?: unknown) => {
+      lines.push(String(line));
+    };
+    const form = new FormData();
+    form.set("company", "Acme");
+    form.set("title", "Engineer");
+    try {
+      const result = await createJobAction(form, {
+        db,
+        requireUserId: async () => `store-fail-${process.hrtime.bigint()}`,
+        revalidate: () => {},
+      });
+      assert.deepEqual(result, { error: "Could not save. Please try again." });
+      assert.equal(db.rows.length, 0);
+      const logged = lines.map((line) => JSON.parse(line) as { event?: string; errorMessage?: string });
+      assert.equal(logged.some((event) => event.event === "jobs.store_failed"), true);
+      assert.equal(
+        logged.some((event) => event.errorMessage === "database unavailable"),
+        true
+      );
+    } finally {
+      console.error = original;
+    }
+  });
+
+  it("returns a generic error and logs a secret-safe event when the action throws", async () => {
+    const events: SafeLogEvent[] = [];
+    const secret = "sk-live-job-action-secret";
+    const result = await runJobAction(
+      async () => {
+        throw new Error(`Bearer ${secret}`);
+      },
+      {
+        requireUserId: async () => "user-a",
+        consume: () => ({ ok: true }),
+        revalidate: () => {},
+        log: (event) => events.push(event),
+      }
+    );
+    assert.deepEqual(result, { error: "Could not save. Please try again." });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.event, "jobs.action_failed");
+    assert.equal(events[0]?.level, "error");
+    const serialized = `${JSON.stringify(events)}\n${formatSafeLog(events[0]!)}`;
+    assert.equal(serialized.includes(secret), false);
+    assert.equal(serialized.includes("Bearer [redacted]"), true);
   });
 });

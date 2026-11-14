@@ -4,6 +4,7 @@ import {
   MISSING_ENV,
   TRUSTED_CCC_CLIENT_IP,
 } from "../../lib/tailor-constants";
+import { safeErrorFields, safeLog, type SafeLogger } from "@/lib/safe-log";
 
 export const JD_MAX_CHARS = 50_000;
 
@@ -28,6 +29,7 @@ export type TailorDeps = {
   apiKey?: string | undefined;
   timeoutMs?: number | undefined;
   sessionId?: string | undefined;
+  log?: SafeLogger;
 };
 
 const SAFE_CCC_ERRORS = new Set([
@@ -83,6 +85,13 @@ export function clientSafeError(raw: unknown): string {
     return GENERIC_ERROR;
   }
   return trimmed;
+}
+
+function logEnv(apiKey: string | undefined): Record<string, string | undefined> {
+  if (!apiKey) {
+    return process.env;
+  }
+  return { ...process.env, TAILOR_API_KEY: apiKey };
 }
 
 function isTimeoutOrAbortError(error: unknown): boolean {
@@ -146,9 +155,16 @@ export async function tailorOnDemand(
     };
   }
 
+  const log = deps.log ?? safeLog;
   const apiUrl = (deps.apiUrl ?? process.env.CCC_API_URL)?.replace(/\/$/, "");
   const apiKey = deps.apiKey ?? process.env.TAILOR_API_KEY;
   if (!apiUrl || !apiKey) {
+    log({
+      level: "error",
+      event: "ccc.missing_env",
+      hasApiUrl: Boolean(apiUrl),
+      hasApiKey: Boolean(apiKey),
+    });
     return { ok: false, status: 503, error: MISSING_ENV };
   }
 
@@ -170,6 +186,12 @@ export async function tailorOnDemand(
       signal: AbortSignal.timeout(resolveCccFetchTimeoutMs(deps)),
     });
   } catch (error) {
+    log({
+      level: "error",
+      event: "ccc.fetch_failed",
+      timeout: isTimeoutOrAbortError(error),
+      ...safeErrorFields(error, logEnv(apiKey)),
+    });
     if (isTimeoutOrAbortError(error)) {
       return { ok: false, status: 504, error: GENERIC_ERROR };
     }
@@ -180,6 +202,13 @@ export async function tailorOnDemand(
   try {
     body = await response.json();
   } catch (error) {
+    log({
+      level: "error",
+      event: "ccc.response_parse_failed",
+      status: response.status,
+      timeout: isTimeoutOrAbortError(error),
+      errorClass: isTimeoutOrAbortError(error) ? "timeout" : "parse",
+    });
     if (isTimeoutOrAbortError(error)) {
       return { ok: false, status: 504, error: GENERIC_ERROR };
     }
@@ -188,6 +217,13 @@ export async function tailorOnDemand(
 
   const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   if (!response.ok) {
+    if (response.status >= 500) {
+      log({
+        level: "error",
+        event: "ccc.upstream_error",
+        status: response.status,
+      });
+    }
     const retryAfterSeconds = resolveCccRetryAfterSeconds(response, record);
     return {
       ok: false,
@@ -199,6 +235,11 @@ export async function tailorOnDemand(
 
   const cv = record.cv;
   if (typeof cv !== "string" || !cv.trim()) {
+    log({
+      level: "error",
+      event: "ccc.invalid_success",
+      status: response.status,
+    });
     return { ok: false, status: 502, error: GENERIC_ERROR };
   }
 

@@ -1,4 +1,6 @@
 export const RATE_LIMIT_ERROR = "Too many requests. Please wait before trying again.";
+export const RATE_LIMIT_UNAVAILABLE_ERROR =
+  "Rate limiting is unavailable. Please try again later.";
 
 export type RateLimitSuccess = { ok: true };
 
@@ -7,7 +9,18 @@ export type RateLimitFailure = {
   retryAfterSeconds: number;
 };
 
-export type RateLimitResult = RateLimitSuccess | RateLimitFailure;
+export type RateLimitUnavailable = {
+  ok: false;
+  unavailable: true;
+};
+
+export type RateLimitResult = RateLimitSuccess | RateLimitFailure | RateLimitUnavailable;
+
+export function isRateLimitUnavailable(
+  result: RateLimitResult
+): result is RateLimitUnavailable {
+  return result.ok === false && "unavailable" in result;
+}
 
 export type RateLimitConfig = {
   max: number;
@@ -21,6 +34,8 @@ export type RateLimitStore = {
 export type ConsumeDeps = {
   store?: RateLimitStore;
   now?: number;
+  /** Override production fail-closed unless RATE_LIMIT_ALLOW_PROCESS_LOCAL=true. */
+  allowProcessLocal?: boolean;
 };
 
 const DEFAULT_TAILOR_MAX = 5;
@@ -46,6 +61,13 @@ export function createMemoryStore(): RateLimitStore {
 // Process-local best-effort window. Not shared across instances; resets on restart.
 const defaultStore = createMemoryStore();
 
+function processLocalStoreAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.NODE_ENV !== "production") {
+    return true;
+  }
+  return env.RATE_LIMIT_ALLOW_PROCESS_LOCAL === "true";
+}
+
 export function tailorRateLimitConfig(): RateLimitConfig {
   return {
     max: envInt("RATE_LIMIT_MAX", DEFAULT_TAILOR_MAX),
@@ -70,7 +92,11 @@ export function consumeRateLimit(
     return { ok: false, retryAfterSeconds: 0 };
   }
 
-  const store = deps.store ?? defaultStore;
+  const allowProcessLocal = deps.allowProcessLocal ?? processLocalStoreAllowed();
+  const store = deps.store ?? (allowProcessLocal ? defaultStore : undefined);
+  if (!store) {
+    return { ok: false, unavailable: true };
+  }
   const now = deps.now ?? Date.now();
   const windowStart = now - config.windowMs;
   const timestamps = (store.hits.get(trimmed) ?? []).filter((stamp) => stamp > windowStart);

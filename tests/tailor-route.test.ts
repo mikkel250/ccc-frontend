@@ -182,6 +182,39 @@ describe("readTailorJobDescription", () => {
     }
   });
 
+  it("returns 400 for invalid UTF-8 that would stay valid JSON after replacement", async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode('{"jobDescription":"hello');
+    const suffix = encoder.encode('"}');
+    const invalidUtf8 = new Uint8Array(prefix.length + 1 + suffix.length);
+    invalidUtf8.set(prefix, 0);
+    invalidUtf8[prefix.length] = 0xff;
+    invalidUtf8.set(suffix, prefix.length + 1);
+    const result = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(invalidUtf8)),
+      1024,
+      5_000
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.status, 400);
+      assert.equal(result.error, INVALID_JSON);
+    }
+  });
+
+  it("accepts well-formed UTF-8 in the job description", async () => {
+    const cafe = new TextEncoder().encode('{"jobDescription":"café"}');
+    const result = await readTailorJobDescription(
+      streamingJsonRequest(byteStream(cafe)),
+      1024,
+      5_000
+    );
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.jobDescription, "café");
+    }
+  });
+
   it("returns an empty job description when the request has no body", async () => {
     const request = new Request("http://127.0.0.1/api/tailor", { method: "POST" });
     const result = await readTailorJobDescription(request, 1024, 30);
@@ -240,6 +273,32 @@ describe("POST /api/tailor", () => {
     } finally {
       restore();
     }
+  });
+
+  it("returns 400 when the body stream errors without consuming rate limit or calling CCC", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        return Promise.reject(new Error("stream read failed"));
+      },
+    });
+    let consumed = 0;
+    let called = false;
+    const response = await handleTailorPost(streamingJsonRequest(stream), {
+      ...signedIn,
+      consume: () => {
+        consumed += 1;
+        return { ok: true as const };
+      },
+      tailor: async () => {
+        called = true;
+        return { ok: true, cv: "UEsDbA==", replyText: null };
+      },
+    });
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { error?: string };
+    assert.equal(body.error, INVALID_JSON);
+    assert.equal(consumed, 0);
+    assert.equal(called, false);
   });
 
   it("returns 400 for malformed JSON", async () => {
