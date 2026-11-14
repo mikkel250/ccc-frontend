@@ -57,6 +57,8 @@ export type JobsStore = JobsTransactionStore & {
 
 export type JobDeps = {
   db?: JobsStore;
+  now?: () => Date;
+  timeZone?: string;
 };
 
 type JobDelegate = Pick<
@@ -108,6 +110,13 @@ export function isJobStatus(value: string): value is JobStatus {
   return (JOB_STATUSES as readonly string[]).includes(value);
 }
 
+function utcCalendarDay(value: Date): string {
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function toBoardJob(job: JobRecord): BoardJob {
   return {
     id: job.id,
@@ -116,7 +125,7 @@ export function toBoardJob(job: JobRecord): BoardJob {
     url: job.url,
     notes: job.notes,
     status: job.status,
-    appliedAt: job.appliedAt.toISOString().slice(0, 10),
+    appliedAt: utcCalendarDay(job.appliedAt),
   };
 }
 
@@ -170,10 +179,22 @@ function requireUserId(userId: string): JobFailure | null {
   return null;
 }
 
-function calendarDateUtc(value = new Date()): Date {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
+function calendarDateUtc(
+  value: Date,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) {
+    throw new Error("Could not read the calendar date.");
+  }
   return new Date(`${year}-${month}-${day}T00:00:00.000Z`);
 }
 
@@ -279,7 +300,8 @@ export async function createJob(
     return { ok: false, code: "invalid", error: "Check the applied date." };
   }
   const db = getDb(deps);
-  const persistedAppliedAt = appliedAt ?? calendarDateUtc();
+  const persistedAppliedAt =
+    appliedAt ?? calendarDateUtc(deps?.now?.() ?? new Date(), deps?.timeZone);
   const created = await withStore(
     () =>
       retryPositionConflict(() =>
