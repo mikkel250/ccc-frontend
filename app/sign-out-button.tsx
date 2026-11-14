@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { clientSafeSignOutError } from "@/lib/auth-client-error";
 import { authClient } from "@/lib/auth-client";
 
 type SignOutResult = { error: { message?: string } | null };
@@ -25,7 +26,7 @@ export function SignOutButton({
     try {
       const { error: signOutError } = await signOut();
       if (signOutError) {
-        setError(signOutError.message || "Sign out failed. Please try again.");
+        setError(clientSafeSignOutError(signOutError.message));
         return;
       }
       goToLogin();

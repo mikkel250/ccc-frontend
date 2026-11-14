@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { clientSafeSignInError } from "@/lib/auth-client-error";
 import { authClient } from "@/lib/auth-client";
 
 type SignInResult = { error: { message?: string } | null };
@@ -27,7 +28,7 @@ export function LoginForm({ signIn = (input) => authClient.signIn.email(input) }
         password,
       });
       if (signInError) {
-        setError(signInError.message || "Sign in failed. Please try again.");
+        setError(clientSafeSignInError(signInError.message));
         return;
       }
       router.push("/board");

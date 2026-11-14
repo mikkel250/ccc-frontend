@@ -34,7 +34,7 @@ export type RateLimitStore = {
 export type ConsumeDeps = {
   store?: RateLimitStore;
   now?: number;
-  /** Override production fail-closed unless RATE_LIMIT_ALLOW_PROCESS_LOCAL=true. */
+  /** Skip resolveAllowProcessLocalRateLimit and force the memory bucket on or off. */
   allowProcessLocal?: boolean;
 };
 
@@ -61,11 +61,30 @@ export function createMemoryStore(): RateLimitStore {
 // Process-local best-effort window. Not shared across instances; resets on restart.
 const defaultStore = createMemoryStore();
 
-function processLocalStoreAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+export function resolveAllowProcessLocalRateLimit(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
   if (env.NODE_ENV !== "production") {
     return true;
   }
-  return env.RATE_LIMIT_ALLOW_PROCESS_LOCAL === "true";
+  const raw = env.RATE_LIMIT_ALLOW_PROCESS_LOCAL?.trim();
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  throw new Error(
+    'RATE_LIMIT_ALLOW_PROCESS_LOCAL must be "true" or "false" when NODE_ENV is production'
+  );
+}
+
+function processLocalStoreAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    return resolveAllowProcessLocalRateLimit(env);
+  } catch {
+    return false;
+  }
 }
 
 export function tailorRateLimitConfig(): RateLimitConfig {
