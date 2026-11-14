@@ -453,6 +453,71 @@ describe("kanban board", { concurrency: 1 }, () => {
     }
   });
 
+  it("resets the create form only after the add succeeds", async () => {
+    const view = await render(
+      createElement(KanbanBoard, {
+        jobs: [],
+        actions: {
+          createJob: async (formData) => {
+            const company = formData.get("company");
+            if (company === "Error Co") {
+              return { error: "Check the company, title, URL, and notes." };
+            }
+            if (company === "Throw Co") {
+              throw new Error("db down");
+            }
+            return undefined;
+          },
+        },
+      })
+    );
+    try {
+      const add = view.container.querySelector("form");
+      assert.ok(add);
+      const company = field(add, "company");
+      const title = field(add, "title");
+      const notes = field(add, "notes");
+
+      company.value = "Error Co";
+      title.value = "Designer";
+      notes.value = "Keep me";
+      await act(async () => {
+        add.requestSubmit();
+      });
+      assert.equal(company.value, "Error Co");
+      assert.equal(title.value, "Designer");
+      assert.equal(notes.value, "Keep me");
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Check the company, title, URL, and notes."
+      );
+
+      company.value = "Throw Co";
+      await act(async () => {
+        add.requestSubmit();
+      });
+      assert.equal(company.value, "Throw Co");
+      assert.equal(title.value, "Designer");
+      assert.equal(notes.value, "Keep me");
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Could not save. Please try again."
+      );
+      assert.equal(view.container.textContent?.includes("db down"), false);
+
+      company.value = "Beta";
+      await act(async () => {
+        add.requestSubmit();
+      });
+      assert.equal(company.value, "");
+      assert.equal(title.value, "");
+      assert.equal(notes.value, "");
+      assert.equal(view.container.querySelector("[role=alert]"), null);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
   it("shows pending and rejected board actions", async () => {
     let releaseCreate: () => void = () => undefined;
     const createPending = new Promise<void>((resolve) => {

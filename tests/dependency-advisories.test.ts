@@ -162,6 +162,19 @@ describe("patched advisory floors", () => {
     assert.equal(gte(zod, [4, 6, 6]), true, `zod ${zod} must be >= 4.6.6`);
   });
 
+  it("pins react and react-dom to the same exact version", () => {
+    const react = requireVersion(pkg.dependencies?.react, "react package.json");
+    const reactDom = requireVersion(pkg.dependencies?.["react-dom"], "react-dom package.json");
+    assert.equal(react, reactDom, `react (${react}) and react-dom (${reactDom}) must match`);
+    const lock = readLockfile();
+    assert.equal(
+      lockVersion(lock, "react"),
+      lockVersion(lock, "react-dom"),
+      "react and react-dom lockfile versions must match"
+    );
+    assert.equal(installedVersion("react"), installedVersion("react-dom"));
+  });
+
   it("resolves the lockfile and the installed copies to those floors", () => {
     const lock = readLockfile();
     for (const floor of resolvedFloors) {
