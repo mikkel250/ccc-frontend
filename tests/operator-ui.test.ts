@@ -428,11 +428,13 @@ describe("kanban board", { concurrency: 1 }, () => {
         (button) => button.textContent === "Edit"
       );
       assert.ok(edit);
+      const card = edit.closest("article");
+      assert.ok(card);
       await act(async () => {
         edit.click();
       });
-      const editor = [...view.container.querySelectorAll("form")].at(-1);
-      assert.ok(editor);
+      const editor = card.querySelector("form");
+      assert.ok(editor, "edit form must open inside the job card");
       const expected: Array<[string, string]> = [
         ["company", "Company"],
         ["title", "Role title"],
