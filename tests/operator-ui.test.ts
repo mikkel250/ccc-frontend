@@ -421,6 +421,40 @@ describe("kanban board", { concurrency: 1 }, () => {
     }
   });
 
+  it("labels edit form fields with the same names as the create form", async () => {
+    const view = await render(createElement(KanbanBoard, { jobs: [sampleJob] }));
+    try {
+      const edit = [...view.container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Edit"
+      );
+      assert.ok(edit);
+      await act(async () => {
+        edit.click();
+      });
+      const editor = [...view.container.querySelectorAll("form")].at(-1);
+      assert.ok(editor);
+      const expected: Array<[string, string]> = [
+        ["company", "Company"],
+        ["title", "Role title"],
+        ["url", "URL"],
+        ["appliedAt", "Applied date"],
+        ["notes", "Notes"],
+      ];
+      for (const [name, label] of expected) {
+        const control = editor.querySelector(`[name="${name}"]`);
+        assert.ok(
+          control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement,
+          `edit form is missing ${name}`
+        );
+        const wrapping = control.closest("label");
+        assert.ok(wrapping, `${name} must be inside a label`);
+        assert.match(wrapping.textContent ?? "", new RegExp(label));
+      }
+    } finally {
+      await view.cleanup();
+    }
+  });
+
   it("creates, edits, moves, and deletes a card", async () => {
     const calls: string[] = [];
     const view = await render(
