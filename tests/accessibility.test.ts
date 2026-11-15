@@ -110,8 +110,16 @@ describe("accessibility source", () => {
 
   it("defines skip-link and :focus-visible styles in globals.css", () => {
     const css = readAppFile("app/globals.css");
-    assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid currentColor/);
-    assert.match(css, /:focus-visible\s*\{[^}]*outline-offset:\s*2px/);
+    const focusVisible = css.match(/:focus-visible\s*\{[^}]*\}/)?.[0];
+    assert.ok(focusVisible, "missing :focus-visible rule");
+    assert.doesNotMatch(
+      focusVisible,
+      /currentColor/,
+      "currentColor outlines disappear on filled primary buttons (white text on white page)"
+    );
+    assert.match(focusVisible, /outline:\s*2px solid var\(--foreground\)/);
+    assert.match(focusVisible, /outline-offset:\s*2px/);
+    assert.match(focusVisible, /box-shadow:\s*0 0 0 4px var\(--background\)/);
     assert.match(css, /\.skip-link\s*\{/);
     assert.match(css, /\.skip-link:(?:focus|focus-visible)\s*\{/);
     assert.match(css, /clip(?:-path)?:/);

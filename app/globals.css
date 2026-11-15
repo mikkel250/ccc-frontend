@@ -26,8 +26,9 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid currentColor;
+  outline: 2px solid var(--foreground);
   outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--background);
 }
 
 .skip-link {

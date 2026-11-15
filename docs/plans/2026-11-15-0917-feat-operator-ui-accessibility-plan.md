@@ -42,7 +42,7 @@ Keyboard users currently tab through the header nav on every page because there 
 
 - R1. Root layout exposes a skip-to-content link as the first focusable element in `<body>`, before `SiteHeader`. The link targets `#main-content` with a same-page native `<a>` (not `next/link`).
 - R2. Every page `<main>` (home, login, register, board success, board load-error, `app/error.tsx`) has `id="main-content"` and is programmatically focusable (`tabIndex={-1}`) so the skip link moves keyboard focus. `app/global-error.tsx` keeps its own `<main>` landmark; it replaces the root layout so it does not host the skip link.
-- R3. `:focus-visible` styles in `app/globals.css` draw a 2px `currentColor` outline with 2px offset. The skip link is visually hidden until focused, then appears above the header.
+- R3. `:focus-visible` styles in `app/globals.css` draw a 2px `--foreground` outline with 2px offset plus a `--background` box-shadow ring so the mark stays visible on filled primary buttons and on both light and dark page backgrounds. The skip link is visually hidden until focused, then appears above the header.
 - R4. Every operator-editable form control has an accessible name. Keep existing wrapping `<label>` elements. Add wrapping labels on the Kanban edit form fields (company, title, URL, applied date, notes) matching the create-form wording.
 - R5. Tests prove R1–R4: skip link source and render, `#main-content` on page mains, focus-visible and skip-link CSS, Kanban edit labels. Existing operator-ui tests still pass.
 - R6. No API, auth, rate-limit, env-var, or copy changes except the skip-link text and the new edit-field labels.
@@ -78,7 +78,7 @@ Keyboard users currently tab through the header nav on every page because there 
   - **Covers R3.**
   - **Given:** `app/globals.css`.
   - **When:** Source is read.
-  - **Then:** `:focus-visible` sets a 2px outline and 2px offset; `.skip-link` is off-screen until `:focus` / `:focus-visible`.
+  - **Then:** `:focus-visible` sets a 2px `--foreground` outline, 2px offset, and `--background` box-shadow (not `currentColor`); `.skip-link` is off-screen until `:focus` / `:focus-visible`.
 - AE4. Edit fields are labeled
   - **Covers R4.**
   - **Given:** A board with one card, Edit clicked.
@@ -137,7 +137,7 @@ U1 failing accessibility tests → U2 skip link + main ids + CSS → U3 Kanban e
 
 - **Goal:** R1–R3 pass.
 - **Files:** `app/skip-to-content.tsx`, `app/layout.tsx`, `app/globals.css`, `app/page.tsx`, `app/login/page.tsx`, `app/register/page.tsx`, `app/board/page.tsx`, `app/error.tsx`.
-- **Approach:** Add `SkipToContent`. Point every layout-backed `<main>` at `#main-content` with `tabIndex={-1}`. CSS: `.skip-link` clipped/off-screen until focus; `:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }`.
+- **Approach:** Add `SkipToContent`. Point every layout-backed `<main>` at `#main-content` with `tabIndex={-1}`. CSS: `.skip-link` clipped/off-screen until focus; `:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; box-shadow: 0 0 0 4px var(--background); }`.
 - **Done when:** AE1–AE3 pass. Existing tests still pass.
 - **Test scenarios:** AE1, AE2, AE3, AE5.
 
