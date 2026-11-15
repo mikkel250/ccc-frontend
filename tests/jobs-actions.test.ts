@@ -68,6 +68,26 @@ describe("job action form data", () => {
     assert.equal(db.rows.length, 0);
   });
 
+  it("rejects a non-string title and unsafe create URLs through server actions", async () => {
+    const db = createMemoryStore();
+    const badTitle = new FormData();
+    badTitle.set("company", "Acme");
+    badTitle.set("title", new File(["Eng"], "title.txt"));
+    assert.deepEqual(await createJobAction(badTitle, depsFor(db)), {
+      error: "Check the company, title, URL, and notes.",
+    });
+    assert.equal(db.rows.length, 0);
+
+    const badUrl = new FormData();
+    badUrl.set("company", "Acme");
+    badUrl.set("title", "Engineer");
+    badUrl.set("url", "javascript:alert(1)");
+    assert.deepEqual(await createJobAction(badUrl, depsFor(db)), {
+      error: "Check the company, title, URL, and notes.",
+    });
+    assert.equal(db.rows.length, 0);
+  });
+
   it("clears url and notes only when those fields are present", async () => {
     const db = createMemoryStore([seedJob({ id: "a1", userId: "user-a" })]);
     const clear = new FormData();

@@ -214,6 +214,32 @@ describe("authentication forms", { concurrency: 1 }, () => {
     }
   });
 
+  it("shows the allowlisted sign-in rate-limit message", async () => {
+    const view = await render(
+      createElement(LoginForm, {
+        signIn: async () => ({
+          error: { message: "Too many requests. Please try again later." },
+        }),
+      })
+    );
+    try {
+      await act(async () => {
+        typeInto(control(view.container, 'input[type="email"]'), "ada@example.com");
+        typeInto(control(view.container, 'input[type="password"]'), "test-password");
+      });
+      const form = view.container.querySelector("form");
+      assert.ok(form);
+      await submitForm(form);
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Too many requests. Please try again later."
+      );
+      assert.deepEqual(view.calls.pushed, []);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
   it("shows a rejected sign-in and does not navigate", async () => {
     const view = await render(
       createElement(LoginForm, {
@@ -333,6 +359,32 @@ describe("authentication forms", { concurrency: 1 }, () => {
       });
       assert.deepEqual(view.calls.pushed, ["/board"]);
       assert.equal(view.calls.refreshed, 1);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
+  it("shows the allowlisted sign-up rate-limit message", async () => {
+    const view = await render(
+      createElement(RegisterForm, {
+        signUp: async () => ({
+          error: { message: "Too many requests. Please try again later." },
+        }),
+      })
+    );
+    try {
+      await act(async () => {
+        typeInto(control(view.container, 'input[type="email"]'), "ada@example.com");
+        typeInto(control(view.container, 'input[type="password"]'), "test-password");
+      });
+      const form = view.container.querySelector("form");
+      assert.ok(form);
+      await submitForm(form);
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Too many requests. Please try again later."
+      );
+      assert.deepEqual(view.calls.pushed, []);
     } finally {
       await view.cleanup();
     }
@@ -909,6 +961,32 @@ describe("sign out", { concurrency: 1 }, () => {
       });
       assert.deepEqual(assigned, ["/login"]);
       assert.equal(view.container.querySelector("[role=alert]"), null);
+    } finally {
+      await view.cleanup();
+    }
+  });
+
+  it("shows the allowlisted sign-out rate-limit message and does not redirect", async () => {
+    const assigned: string[] = [];
+    const view = await render(
+      createElement(SignOutButton, {
+        signOut: async () => ({
+          error: { message: "Too many requests. Please try again later." },
+        }),
+        goToLogin: () => {
+          assigned.push("/login");
+        },
+      })
+    );
+    try {
+      await act(async () => {
+        view.container.querySelector("button")?.click();
+      });
+      assert.equal(
+        view.container.querySelector("[role=alert]")?.textContent,
+        "Too many requests. Please try again later."
+      );
+      assert.deepEqual(assigned, []);
     } finally {
       await view.cleanup();
     }

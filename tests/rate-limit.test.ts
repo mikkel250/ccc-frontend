@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   consumeRateLimit,
   createMemoryStore,
+  isRateLimitUnavailable,
+  jobsRateLimitConfig,
   resolveAllowProcessLocalRateLimit,
   tailorRateLimitConfig,
 } from "../lib/rate-limit";
@@ -32,6 +34,27 @@ describe("consumeRateLimit", { concurrency: 1 }, () => {
     assert.equal(consumeRateLimit("jobs:user-a", config, { store, now }).ok, true);
     assert.equal(consumeRateLimit("jobs:user-a", config, { store, now }).ok, false);
     assert.equal(consumeRateLimit("jobs:user-a", config, { store, now: now + 1_000 }).ok, true);
+  });
+
+  it("falls back to defaults when JOB_RATE_LIMIT_MAX is invalid", () => {
+    const keys = ["JOB_RATE_LIMIT_MAX", "RATE_LIMIT_WINDOW"] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    try {
+      process.env.JOB_RATE_LIMIT_MAX = "-1";
+      process.env.RATE_LIMIT_WINDOW = "";
+      const config = jobsRateLimitConfig();
+      assert.equal(config.max, 30);
+      assert.equal(config.windowMs, 60_000);
+    } finally {
+      for (const key of keys) {
+        const value = previous[key];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
   });
 
   it("falls back to defaults when RATE_LIMIT_MAX is invalid", () => {
@@ -139,6 +162,14 @@ describe("consumeRateLimit", { concurrency: 1 }, () => {
     const denied = consumeRateLimit("  ", config, { store, now });
     assert.equal(denied.ok, false);
     assert.equal(consumeRateLimit("tailor:user-a", config, { store, now }).ok, true);
+  });
+});
+
+describe("isRateLimitUnavailable", () => {
+  it("is only true for the unavailable branch of RateLimitResult", () => {
+    assert.equal(isRateLimitUnavailable({ ok: true }), false);
+    assert.equal(isRateLimitUnavailable({ ok: false, retryAfterSeconds: 42 }), false);
+    assert.equal(isRateLimitUnavailable({ ok: false, unavailable: true }), true);
   });
 });
 
