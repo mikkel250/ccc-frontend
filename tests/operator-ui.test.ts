@@ -434,7 +434,7 @@ describe("kanban board", { concurrency: 1 }, () => {
         edit.click();
       });
       const editor = card.querySelector("form");
-      assert.ok(editor, "edit form must open inside the job card");
+      assert.ok(editor instanceof HTMLFormElement, "edit form must open inside the job card");
       const expected: Array<[string, string]> = [
         ["company", "Company"],
         ["title", "Role title"],
@@ -504,8 +504,10 @@ describe("kanban board", { concurrency: 1 }, () => {
       await act(async () => {
         edit.click();
       });
-      const editor = [...view.container.querySelectorAll("form")].at(-1);
-      assert.ok(editor);
+      const card = edit.closest("article");
+      assert.ok(card);
+      const editor = card.querySelector("form");
+      assert.ok(editor instanceof HTMLFormElement);
       const editedTitle = field(editor, "title");
       editedTitle.value = "Staff engineer";
       await act(async () => {
@@ -652,8 +654,10 @@ describe("kanban board", { concurrency: 1 }, () => {
       await act(async () => {
         edit.click();
       });
-      const editor = [...view.container.querySelectorAll("form")].at(-1);
-      assert.ok(editor);
+      const card = edit.closest("article");
+      assert.ok(card);
+      const editor = card.querySelector("form");
+      assert.ok(editor instanceof HTMLFormElement);
       await act(async () => {
         editor.requestSubmit();
       });
