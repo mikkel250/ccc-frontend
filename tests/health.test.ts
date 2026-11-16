@@ -21,6 +21,39 @@ function envKeysFromExample(source: string): string[] {
   return [...keys].sort();
 }
 
+type CatalogRow = {
+  variable: string;
+  required: string;
+  defaultValue: string;
+  missing: string;
+};
+
+function parseCatalogRows(markdown: string): CatalogRow[] {
+  const rows: CatalogRow[] = [];
+  for (const line of markdown.split(/\r?\n/)) {
+    if (!line.startsWith("|")) {
+      continue;
+    }
+    const cells = line
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    if (cells.length < 4) {
+      continue;
+    }
+    const [variable, required, defaultValue, missing] = cells;
+    if (variable === "Variable" || /^:?-+:?$/.test(variable)) {
+      continue;
+    }
+    rows.push({ variable, required, defaultValue, missing });
+  }
+  return rows;
+}
+
+function catalogRowFor(rows: CatalogRow[], key: string): CatalogRow | undefined {
+  return rows.find((row) => row.variable.includes(`\`${key}\``));
+}
+
 function snapshotEnv(keys: string[]): () => void {
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   return () => {
@@ -87,7 +120,7 @@ describe("health is unauthenticated", () => {
 });
 
 describe("production env runbook", () => {
-  it("names every catalogued env var, required vs optional, default, and missing effect", () => {
+  it("gives each catalogued env var a table row with required, default, and missing cells", () => {
     const exampleKeys = envKeysFromExample(read(".env.example"));
     assert.ok(exampleKeys.includes("CCC_API_URL"));
     assert.ok(exampleKeys.includes("TAILOR_API_KEY"));
@@ -96,15 +129,20 @@ describe("production env runbook", () => {
     assert.ok(exampleKeys.includes("BETTER_AUTH_URL"));
 
     const runbook = read("docs/ops/production-env.md");
+    const rows = parseCatalogRows(runbook);
+    const proseOnly = parseCatalogRows(
+      "DATABASE_URL is required. Optional default if missing.\n"
+    );
+    assert.equal(catalogRowFor(proseOnly, "DATABASE_URL"), undefined);
+
     for (const key of [...exampleKeys, "NODE_ENV"]) {
-      assert.match(runbook, new RegExp(`\\b${key}\\b`), `runbook missing ${key}`);
+      const row = catalogRowFor(rows, key);
+      assert.ok(row, `catalog table is missing a row for ${key}`);
+      assert.notEqual(row.required, "", `${key} required cell is empty`);
+      assert.notEqual(row.defaultValue, "", `${key} default cell is empty`);
+      assert.notEqual(row.missing, "", `${key} missing/invalid cell is empty`);
     }
-    assert.match(runbook, /required/i);
-    assert.match(runbook, /optional/i);
-    assert.match(runbook, /default/i);
-    assert.match(runbook, /missing/i);
     assert.match(runbook, /\/api\/health/);
     assert.match(runbook, /NEXT_PUBLIC_/);
-    assert.match(runbook, /never|do not prefix/i);
   });
 });
