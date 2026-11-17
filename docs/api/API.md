@@ -163,13 +163,13 @@ Errors use `{ "error": string }`. `remaining` / `resetTime` appear on 429 only.
 | `MASTER_CV_JSON` / `MASTER_CV_PATH` | Canonical master CV | Prefer env body; path must not be world-readable |
 | `TAILOR_MODEL` | Curator model (`provider/model`) | `anthropic/sonnet` |
 | `TAILOR_DEFAULT_CURATION_MODE` | Default `curationMode` when omitted (`strict` \| `flexible`) | `strict` |
-| `RATE_LIMIT_MAX` | Per-IP sliding-window ceiling | `5` |
+| `RATE_LIMIT_MAX` | Per-caller sliding-window ceiling (`session:<id>` after authed body with usable `sessionId`, else client IP) | `5` |
 | `RATE_LIMIT_SECRET_MAX` | Per-shared-secret ceiling | half of `RATE_LIMIT_MAX` (min 1) |
 | `RATE_LIMIT_WINDOW` | Sliding window length (ms) | `60000` |
 | `TAILOR_REQUEST_MAX_BYTES` / `TAILOR_JD_MAX_CHARS` | Ingress limits | `65536` / `50000` |
 | `TAILOR_CURATED_JSON_MAX_BYTES` / `TAILOR_RESPONSE_MAX_BYTES` | Egress limits | `512000` / `2097152` |
 
-Full catalog with comments: [`.env.example`](../../.env.example)
+CCC deployment catalog (Master CV, curator, Upstash, Gmail CLIs, etc.): companion **CCC** repo `.env.example`. This UI/BFF only: [`.env.example`](../../.env.example) (`CCC_API_URL`, auth, Postgres, `CCC_FETCH_TIMEOUT_MS`, BFF `RATE_LIMIT_*`).
 
 ---
 
