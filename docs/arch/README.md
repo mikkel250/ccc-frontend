@@ -14,21 +14,24 @@ Frontend + BFF for CCC on-demand tailor.
 - Browser responses set CSP (`connect-src 'self'`, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `Referrer-Policy`, `X-Content-Type-Options: nosniff`, and `Permissions-Policy`. Production also sends HSTS. `next.config.ts` hides `X-Powered-By`. Nonce-based CSP is deferred (it would force dynamic rendering).
 - Gmail / inbox worker is out of scope (companion CCC).
 
-## Layout (M1)
+## Layout
 
 ```
 app/
-  page.tsx              # tailor form page
-  tailor-form.tsx       # client form + download / reply display
-  error.tsx             # route error boundary
-  global-error.tsx      # root error boundary
-  api/
-    tailor/route.ts     # BFF route
-    lib/ccc-tailor.ts   # CCC client + client-safe errors
+  page.tsx, tailor-form.tsx          # on-demand tailor UI
+  board/page.tsx, board/kanban-board.tsx
+  login/, register/, sign-out-button.tsx
+  actions/jobs.ts                    # job server actions
+  api/tailor/route.ts, api/auth/[...all]/route.ts
+  api/lib/ccc-tailor.ts, tailor-post.ts
+  error.tsx, global-error.tsx, layout.tsx
 lib/
-  safe-log.ts           # JSON logs with secret redaction
-tests/
-  ccc-tailor.test.ts    # mocked CCC
+  auth.ts, auth-client.ts, session.ts, registration.ts
+  jobs.ts, job-actions.ts, prisma.ts, rate-limit.ts
+  safe-log.ts, security-headers.ts
+middleware.ts                        # cookie gate on /, /board/*
+prisma/schema.prisma
+tests/                               # node:test (mocked CCC, no live DB in unit runs)
 ```
 
 ## Related

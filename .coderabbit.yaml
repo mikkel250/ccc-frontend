@@ -198,8 +198,9 @@ reviews:
           for the browser download.
 
         `app/page.tsx` calls `requireSessionUserId()` (redirect to `/login`).
-        Middleware does not match `/`. Do not remove the page-level check
-        because middleware exists for `/board`.
+        `middleware.ts` matcher is `["/", "/board", "/board/:path*"]` (cookie
+        gate only). Do not remove the page-level check because a cookie is not
+        full session validation on actions or `POST /api/tailor`.
 
         JD cap is `JD_MAX_CHARS` (50000) in `ccc-tailor.ts`, before fetch.
         Empty JD is 400 and does not call CCC.
@@ -224,8 +225,8 @@ reviews:
           are the session API. `requireSessionUserId` redirects to `/login`.
         - Server Actions and pages use that helper. Do not trust a user id
           from form data, search params, or the client.
-        - `middleware.ts` matcher is `/board` only, and it may use
-          `getSessionCookie` only. Do not import `prisma` or `lib/auth.ts`
+        - `middleware.ts` matcher is `["/", "/board", "/board/:path*"]`, and it
+          may use `getSessionCookie` only. Do not import `prisma` or `lib/auth.ts`
           into middleware (Edge). A cookie check is not a substitute for
           `requireSessionUserId` on actions or for the 401 on `POST /api/tailor`.
 
@@ -316,8 +317,10 @@ reviews:
       instructions: |-
         `.env.example` is the env catalog. New vars need a comment and a
         safe placeholder. Current server vars: `CCC_API_URL`, `TAILOR_API_KEY`,
-        `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
-        `ALLOW_REGISTRATION`.
+        optional `CCC_FETCH_TIMEOUT_MS`, `DATABASE_URL`, `BETTER_AUTH_SECRET`,
+        `BETTER_AUTH_URL`, `ALLOW_REGISTRATION`, production
+        `RATE_LIMIT_ALLOW_PROCESS_LOCAL`, BFF `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW`,
+        and `JOB_RATE_LIMIT_MAX`.
 
         No fake default for `TAILOR_API_KEY` or `BETTER_AUTH_SECRET`.
         Do not add `NEXT_PUBLIC_` aliases for those. `ALLOW_REGISTRATION`

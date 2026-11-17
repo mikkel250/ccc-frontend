@@ -14,4 +14,4 @@ First-user signup is serialized by inserting a singleton `RegistrationClaim` (`i
 - P2 `lib/jobs.ts:181` Parallel card creates collide on position — [issue #1](https://github.com/mikkel250/ccc-frontend/issues/1)
 - P2 `lib/jobs.ts:119` JobsStore cast erases Prisma write types — [issue #2](https://github.com/mikkel250/ccc-frontend/issues/2)
 
-Not filed (residual risks / deferred product): Postgres RLS, CCC fetch timeout (pre-existing on the tailor proxy), unique `(userId, status, position)` until a later migration, Better Auth origin must match the browser URL.
+Not filed (residual risks / deferred product): Postgres RLS, CCC fetch timeout (pre-existing on the tailor proxy), Better Auth origin must match the browser URL.
