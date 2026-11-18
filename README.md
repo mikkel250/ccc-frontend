@@ -34,7 +34,7 @@ PORT=3001 npm run dev
 
 Register the first operator at `/register`, then sign in. `/`, `/board`, and `POST /api/tailor` require that session. After a valid session, tailor and job mutations use a best-effort per-user window (`RATE_LIMIT_MAX` / `JOB_RATE_LIMIT_MAX`). That window is in-memory and process-local: it resets on restart and is not shared across instances. In production, `RATE_LIMIT_ALLOW_PROCESS_LOCAL` must be `true` (single instance) or `false` (bucket off; tailor returns 503 and job actions return the same client-safe string). The server refuses to start when that variable is missing or any other value. CCC’s hashed-secret bucket remains the tailor backstop. Sign-in and sign-up keep a coarse shared fallback that ignores client forwarding headers. After the first user exists, public registration is closed unless `ALLOW_REGISTRATION=true`.
 
-`TAILOR_API_KEY`, `DATABASE_URL`, and Better Auth secrets are server-only. Do not prefix them with `NEXT_PUBLIC_`.
+`TAILOR_API_KEY`, `DATABASE_URL`, and Better Auth secrets are server-only. Do not prefix them with `NEXT_PUBLIC_`. Production env vars, defaults, and fail-closed behavior: [docs/ops/production-env.md](docs/ops/production-env.md). Unsigned `GET /api/health` is liveness only (`{"ok":true}`); it does not prove CCC or Postgres.
 
 ## Scripts
 
