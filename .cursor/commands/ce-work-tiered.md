@@ -1,212 +1,175 @@
 ---
-description: Tiered work execution — reads complexity tiers from plan (set by /ce-plan-classify). TDD gate, coupling tags, pre-flight self-correction. Run on cheap model for Routine, good model for Complex/Difficult.
-argument-hint: "[plan path, or blank to auto-discover]"
----
-You are a Work Execution Agent. Complexity tiers are already in the plan — you read them, don't infer them. Your job: enforce TDD gate, implement tasks at the right tier, apply coupling tags, and run pre-flight self-correction.
-
-**How to use this prompt:** Run `/ce-plan-classify` first (on a good model) to assign Routine/Complex/Difficult to each task. Then invoke this prompt:
-- On a cheap model → implements only Routine tasks, defers Complex/Difficult
-- On a good model → implements Complex/Difficult tasks (all Routine are already Done from the cheap pass)
-
+description: Autonomous tiered work execution for Cursor Cloud Agents. Orchestrator dispatches each plan task to a subagent on the model matched to its complexity tier (set by /ce-plan-classify). TDD gate, coupling tags, no human in the loop.
+argument-hint: "[plan path, or blank to use the Active plan]"
 ---
 
-## Stage 0: Plan Resolution & Tier Check
+You are the orchestrator of an autonomous work run inside a Cursor Cloud Agent. No human is watching and no one will answer questions. Read the tiered plan, dispatch each pending task to a subagent on the model for its tier, verify each result yourself, record status in the plan, and finish with a report.
 
-1. **Resolve the plan:**
-   - If `$@` is provided: read that file.
-   - If blank:
-     1. Resolve CE artifact root `<root>`: read `docs_root` from `<repo-root>/.compound-engineering/config.local.yaml`, then `config.yaml`; first non-empty value wins (`<repo-root>` = `git rev-parse --show-toplevel`). Unset → `<root>` is `docs`. If `docs_root` is set, validate it is a repo-relative directory whose real, symlink-resolved path stays inside the repo and is neither the repo root nor under `.git/`. Otherwise stop with an error naming `docs_root` and the value — never fall back to `docs`.
-     2. Search `<root>/plans/` for the most recent CE plan (timestamped `.md` files). Pick the newest by date prefix.
-   - If no plan found: "No plan found. Run /ce-plan first."
+Complexity tiers are already in the plan. Read them. Do not infer them. Review of this output happens in `/ce-code-review-tiered`, not here.
 
-2. **Read complexity tiers from the plan.** Each implementation unit must have a `Complexity:` field (Routine, Complex, or Difficult).
+---
 
-3. **If tiers are missing:** stop immediately.
-   > "Plan has no complexity tiers. Run /ce-plan-classify first (on DeepSeek v4-pro or equivalent), then re-run this prompt."
-   
-   Do not classify on-the-fly. Do not guess. Stop.
+## Operating Rules
 
-4. **Determine what to implement this pass:**
-   - Collect all `Status: Pending` tasks.
-   - If any are Routine → this is a Routine pass. Implement only Routine tasks. Defer Complex/Difficult.
-   - If NO Routine tasks remain (all Pending are Complex/Difficult) → this is a Complex pass. Implement Complex tasks with 5-attempt limit. Human gate for Difficult tasks.
+- **Never ask the user.** Blockers go in the plan's `## Blockers` section. Move on to the next task.
+- **The parent never writes feature code.** Implementation goes through Task subagents. The parent edits the plan file and docs, and runs verification.
+- **The parent is the only writer of the plan file.** Subagents report. The parent sets `Status:`.
+- **Verify, don't trust.** After each subagent, re-run the task's tests and lint yourself.
+- **Sequential dispatch.** One subagent at a time, in plan order. Subagents share one working tree.
+- **Sonnet only for Difficult.** Use only the routing table below. Sonnet 5.5 at high effort is approved for Difficult tasks in the plan and nothing else. No `*-fast` slugs.
+- **No git commits.** Leave all changes uncommitted.
 
-5. **Emit the pass plan:**
+---
+
+## Model Routing
+
+Pass `model` explicitly on every Task call. Use `subagent_type: generalPurpose`.
+
+| Tier | Task `model` |
+|------|--------------|
+| Routine | `composer-2.5` |
+| Complex | `grok-4.7` (high effort) |
+| Difficult | `claude-sonnet-5-5` (high effort) |
+
+If a slug is missing from the Task tool's list, add a Blocker naming it and stop the run. Do not substitute another model.
+
+---
+
+## Stage 0: Branch, Plan, Queue
+
+1. **Branch.** Run `git branch --show-current`. If it is `main`, run `git checkout -b feature/<descriptive-slug>` before any write.
+2. **Resolve the plan.**
+   - If `$@` is provided, use that file.
+   - Otherwise use the Active milestone's linked plan in `docs/plans/README.md`.
+   - Otherwise use the newest timestamped plan in `docs/plans/`.
+   - If none exists, report "No plan found. Run /ce-plan first." and end the run.
+3. **Check tiers.** Every implementation unit needs a `Complexity:` field. If any are missing, add a Blocker: "Run /ce-plan-classify first." Then stop. Do not classify.
+4. **Build the queue.** Take units with `Status: Pending` or `Status: In Progress` (the latter is left over from an interrupted run), in plan order. Skip `Done` and `Blocked`. Skip any unit whose dependency is Blocked, and note why. A unit with no `Tests:` field gets a Blocker and is skipped.
+5. **Emit the run plan:**
 ```
 **Plan:** <path>
-**Pending tasks:** N total
-**This pass:** M Routine (3-attempt limit) / or / M Complex/Difficult (5-attempt limit)
-**Deferred:** X tasks — [list with complexity tiers]
+**Queue:** N tasks — a Routine / b Complex / c Difficult
+**Skipped:** [list with reasons]
 ```
-If this is a Complex pass and any tasks are Difficult, flag them: "⚠️  N Difficult tasks — human confirmation required after tests pass."
 
 ---
 
-## Stage 1: TDD Gate
+## Stage 1: Dispatch Loop
 
-**Before any implementation code is written:**
+For each queued task, in order:
 
-1. For each task in this pass, verify a test file exists that covers the specified `Tests:` scope.
-2. If tests exist: run them.
-3. If coverage of the plan's `Tests:` field is missing: add or update focused tests for that planned behavior only. Do not rewrite unrelated tests.
-4. If any task has no `Tests:` field in the plan: stop. "Task N has no test specification. Update the plan with a `Tests:` field before execution."
+1. Set `Status: In Progress` in the plan file.
+2. Dispatch a Task subagent with the brief from Stage 2. Subagents start with no context, so paste the full task block from the plan.
+3. Verify. Run the task's test scope and lint on the reported files. Run `git status` and confirm the changed files match the report.
+4. Record the outcome:
+   - **Verified pass:** set `Status: Done`. For Difficult tasks, also add `Review: human-required`. The run continues.
+   - **Fail, or subagent reports BLOCKED:** set `Status: Blocked` and append a Blocker. Continue with the next task.
+5. Update the plan file after every task, so an interrupted run resumes cleanly.
 
-**Gate:** No implementation begins until every task in this pass has tests on disk covering the planned behavior.
+**Blocker format** (append only, never delete other entries):
+```
+## Blockers
+- Task N: [name]. Tier: [tier]. Reason: [failure or ambiguity, 1–3 lines]. Next step: [decision needed].
+```
 
 ---
 
-## Stage 2: Execute
+## Stage 2: Subagent Brief
 
-For each task in this pass, in plan order. Stop if any task fails after its iteration limit.
-
-### 2a. Type signature first
-Write the explicit TypeScript signature (parameters + return type) for every new function before writing the body. If the signature requires `any` or a type assertion, stop — redesign the interface.
-
-```typescript
-// Wrong
-async function parseResponse(raw: any): Promise<any> { ... }
-
-// Right
-async function parseResponse(
-  raw: unknown
-): Promise<{ ok: true; data: Result } | { ok: false; error: string }> { ... }
-```
-
-### 2b. Write implementation
-Write production code to satisfy the tests for this task.
-
-### 2c. Self-correction pass (before running tests)
-Re-read every file you modified as a reviewer who did not write the code. Mentally simulate each test:
-- For each test: predict Pass or Fail and state why in one clause.
-- Any test you predict will Fail: fix the implementation now, before running.
-- Any test whose outcome you cannot predict: you don't understand the contract — re-read the test, revise, re-predict.
-- This step is complete only when you can predict Pass for every test.
-
-### 2d. Lint
-Run lint on every file you edited. Fix errors you introduced.
-
-### 2e. Run tests
-Run the test suite for this task's scope. Show the output.
-
-### 2f. Internal critic (before marking Done)
-Check every file you touched against all four:
-
-**(a) Hardcoded literals that belong in env:**
-```typescript
-// Wrong
-const timeout = 30000;
-// Right
-const timeout = getEnvNumber("TIMEOUT_MS", 30000);
-```
-
-**(b) `as`-cast on external/API data:**
-```typescript
-// Wrong
-const body = await req.json() as Request;
-// Right
-const raw = await req.json();
-const parsed = parseRequest(raw);
-```
-
-**(c) `try/catch` in `lib/` returning HTTP shapes:**
-```typescript
-// Wrong — lib function knows about HTTP status codes
-export async function callLLM(...) {
-  try { ... }
-  catch (e) { return NextResponse.json({ error: "failed" }, { status: 500 }); }
-}
-// Right — lib returns discriminated union; route handler maps to HTTP
-```
-
-**(d) Near-duplicate of an existing function:**
-Before marking done, grep the module directory for any function whose signature overlaps ≥80% with what you just wrote. If found: delete yours, extend the existing one with a parameter.
-
-### 2g. Apply coupling tags
-Scan only lines you wrote or modified. On the line immediately above each modified line that needs a tag, add a language-appropriate comment containing the tag — never a bare executable token (for example `// [SIDE-EFFECT]`, not `[SIDE-EFFECT]` on its own):
-
-| Condition | Tag |
-|-----------|-----|
-| Side effect outside local scope | `[SIDE-EFFECT]` |
-| DB trigger/cascade | `[DB-TRIGGER]` |
-| Required call order | `[SEQUENCE]` |
-| Shared/global state mutation | `[SHARED-STATE]` |
-
-Tag only what you introduced. If none apply, add no tags.
-
-### 2h. Iteration limits
-- **Routine:** up to 3 attempts per task
-- **Complex:** up to 5 attempts per task
-- **Difficult:** up to 5 attempts per task, **human gate required** — after tests pass, emit: "Task N tests passing. Complexity: Difficult — human review required before marking Done." Wait for explicit confirmation.
-
-If tests still fail after the limit: emit the failure output and halt.
+Use this brief for every dispatch. Fill in the bracketed fields.
 
 ```
-Task N stuck after [N] attempts. Failure output:
-[paste test output]
-Diagnosis: [best explanation]
-Waiting for human input.
-```
+You are an implementation subagent. You have no context beyond this brief. Work only on the task below.
 
-### 2i. Mark Done
-Tests pass + coupling tags applied + internal critic clean → set `Status: Done` in the plan file.
+Task (verbatim from the plan):
+[Name, Description, Files, Tests, Complexity]
+
+Read first: AGENTS.md, docs/arch/, and every existing file the task touches. Read the target module before changing it.
+
+Procedure:
+1. Red. Write or update the tests in the task's Tests: scope. Run them. Confirm they fail for the right reason. If the planned behavior is already covered and passing, say so with the output.
+2. Type signatures first. Write the explicit signature for each new function before its body. No `any`. No `as` casts on external or API data. Use discriminated unions such as { ok: true } | { ok: false }.
+3. Green. Write the minimum implementation that satisfies the tests.
+4. Before running tests, predict Pass or Fail for each one in one clause. Fix any test you predict will fail.
+5. Lint every file you edited. Run the task's test scope. Show the output.
+6. Internal critic on every file you touched:
+   - Hardcoded values that belong in env. Add them to .env.example with a comment.
+   - try/catch in lib/ returning HTTP shapes. Lib returns discriminated unions; route handlers map to HTTP.
+   - Near-duplicate functions. Grep the module directory and extend an existing function if one exists.
+   - Secrets. TAILOR_API_KEY and CCC_API_URL never appear in client code, NEXT_PUBLIC_* vars, or responses.
+7. Coupling tags. On the line above each line you introduced that needs one, add a language-appropriate comment: `// [SIDE-EFFECT]`, `// [DB-TRIGGER]`, `// [SEQUENCE]`, or `// [SHARED-STATE]`. Tag only lines you wrote. If none apply, add none.
+8. If tests fail, make one self-fix pass, then stop and report. Do not loop.
+
+Hard limits:
+- Do not edit the plan file. Do not commit. Do not rewrite unrelated tests. Do not add scope beyond the task.
+- If the task hits security or auth uncertainty, billing logic, a data-model ambiguity, or a conflict with docs/arch/, report BLOCKED. Do not guess.
+
+Report exactly in this format:
+RESULT: PASS | FAIL | BLOCKED
+FILES: <changed paths>
+TEST COMMAND: <command>
+TEST OUTPUT: <last 20 lines>
+LINT: clean | <errors>
+FAILURE NOTE: <only if FAIL: what failed and why>
+BLOCKER: <only if BLOCKED: the ambiguity and the decision needed>
+```
 
 ---
 
-## Stage 3: Architecture Update
+## Stage 3: Architecture and Docs
 
-If implementation changed architectural reality (new invariant, new dependency, new pattern): update `docs/arch/ARCHITECTURE.md`.
+If the run changed architectural reality (new invariant, dependency, or pattern), update `docs/arch/`. If a public contract changed, update `docs/api/`. Update the nearest `README.md` index when adding docs. The parent does this. Subagents do not.
 
 ---
 
-## Stage 4: Final Summary
+## Stage 4: Full Verification
 
-Emit:
+Run `npm run lint`, `npm run typecheck`, and `npm test`. Record the results for the final report. Do not re-dispatch on failure. Report it.
+
+---
+
+## Stage 5: Final Report
+
 ```
-Tasks complete. Tests passing.
-Verify: [command to run full suite]
-
-Deferred (re-run with better model):
-- Task N: [name] — Complexity: Complex
-- Task M: [name] — Complexity: Difficult
-
-Next: re-run /ce-work-tiered with a good model for deferred tasks.
+Run complete. Plan: <path>
+Done: N (Routine a, Complex b, Difficult c)
+Review required (Difficult): [list]
+Blocked: [list with one-line reason each]
+Skipped: [list with reason]
+Full suite: lint [ok|fail] · typecheck [ok|fail] · test [ok|fail]
+Uncommitted: <git status --short summary>
+Next: /ce-code-review-tiered on this branch
 ```
-
-If no deferred tasks: "All tasks complete. Proceed to /ce-review-cheap for Tier 1 review."
 
 ---
 
 ## Constraints
 
-- **No on-the-fly classification.** If tiers are missing, stop and direct to `/ce-plan-classify`.
-- **No git commits.** Leave all changes uncommitted.
+- **No questions.** Record blockers and continue.
+- **Routing table only.** No premium models.
+- **No git commits.**
 - **No scope creep.** Implement only what the plan specifies.
-- **Architecture alignment.** Cross-reference `docs/arch/ARCHITECTURE.md`. Stop if implementation conflicts.
-- **Blockers.** If unresolvable ambiguity blocks implementation, append a `## Blockers` section to the plan file with the issue, and halt.
-- **Do not rewrite unrelated tests.** Focused additions or updates that cover the planned `Tests:` behavior are allowed.
+- **Do not rewrite unrelated tests.** Focused additions covering the planned `Tests:` behavior are allowed.
 
 ---
 
 ## Wrong / Right
 
-**Wrong:** Implementing before tests cover the planned behavior, or rewriting unrelated tests.
-**Right:** TDD gate: tests cover the planned behavior (add or update focused tests if needed) → then implement.
+**Wrong:** Implementing in the parent to save a subagent call.
+**Right:** Every implementation goes through a Task subagent on its tier's model.
+
+**Wrong:** Trusting a subagent's "tests pass."
+**Right:** Re-run the tests and lint yourself before setting `Status: Done`.
+
+**Wrong:** Stopping the whole run because one task failed.
+**Right:** Mark that task Blocked and continue with the rest of the queue.
+
+**Wrong:** Using Sonnet for a Routine or Complex task, or retrying a failed task on Sonnet.
+**Right:** Sonnet only for Difficult tasks. A failed task is marked Blocked, and the run continues.
 
 **Wrong:** Classifying tasks when tiers are missing.
-**Right:** Stop. Tell user to run `/ce-plan-classify`.
-
-**Wrong:** Implementing Complex tasks on a Routine pass.
-**Right:** Defer them. Re-run with better model.
-
-**Wrong:** `any` in function signatures.
-**Right:** Explicit types with discriminated unions.
-
-**Wrong:** Marking Done without coupling tags, or inserting a bare `[SIDE-EFFECT]` that would execute.
-**Right:** Scan modified lines; put language-appropriate comments such as `// [SIDE-EFFECT]` on the line above side effects, DB triggers, sequences, and shared state.
-
-**Wrong:** Running tests without mental simulation first.
-**Right:** Predict Pass/Fail for every test before running the suite.
+**Right:** Add a Blocker pointing to `/ce-plan-classify`, then stop.
 
 ---
 
-**Begin Stage 0: resolve the plan, check for complexity tiers, emit the pass plan.**
+**Begin Stage 0: check the branch, resolve the plan, verify tiers, build the queue.**
