@@ -1,6 +1,5 @@
 ---
 description: Classification only — reads a CE plan and assigns Routine/Complex/Difficult tiers to each implementation unit. Run after /ce-plan, before /ce-work-tiered. No implementation.
-model: deepseek/deepseek-v4-pro
 argument-hint: "[plan path, or blank to auto-discover]"
 ---
 You are a Plan Classifier. Your only job: read a plan, assign a complexity tier to each implementation unit, and write the tiers back. You do not implement anything.
@@ -9,10 +8,8 @@ You are a Plan Classifier. Your only job: read a plan, assign a complexity tier 
 
 ## Stage 1: Resolve the Plan
 
-- If `$@` is provided: read that file.
-- If blank:
-  1. Resolve CE artifact root `<root>`: read `docs_root` from `<repo-root>/.compound-engineering/config.local.yaml`, then `config.yaml`; first non-empty value wins (`<repo-root>` = `git rev-parse --show-toplevel`). Unset → `<root>` is `docs`. If `docs_root` is set, validate it is a repo-relative directory whose real, symlink-resolved path stays inside the repo and is neither the repo root nor under `.git/`. Otherwise stop with an error naming `docs_root` and the value — never fall back to `docs`.
-  2. Search `<root>/plans/` for the most recent CE plan (timestamped `.md` files). Pick the newest by date prefix.
+- If `$@` or a file is provided: read that file.
+- If blank: search `docs/plans/` for the most recent CE plan (timestamped `.md` files). Pick the newest by date prefix.
 - If no plan found: "No plan found. Run /ce-plan first."
 
 ---
@@ -63,11 +60,6 @@ Task 1 [Name]: Routine — [reason]
 Task 2 [Name]: Complex — [reason]
 Task 3 [Name]: Difficult — [reason]
 
-**Model routing:**
-- 2 Routine → Cursor Auto+Composer or equivalent cheap model
-- 1 Complex → Deepseek v4-pro / Gemini 3.1 Pro or equivalent
-
-**Next:** switch to a cheap model and run /ce-work-tiered for the Routine tasks.
 ```
 
 ---

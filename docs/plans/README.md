@@ -39,5 +39,6 @@ These sit outside the milestone table. Drain skips them.
 ## Other plans
 
 - [Patch critical Next.js and better-auth advisories - Plan](./2026-11-12-chore-patch-critical-advisories-plan.md)
+- [Operator UI accessibility pass](./2026-11-15-0917-feat-operator-ui-accessibility-plan.md)
 
 Related (not a drain row): [User ID rate limit](./2026-11-10-2327-feat-user-id-rate-limit-plan.md) — session-keyed BFF limits. The Kanban plan does not own this ceiling. It does not replace M2.
