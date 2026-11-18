@@ -146,7 +146,7 @@ Next: /ce-code-review-tiered on this branch
 ## Constraints
 
 - **No questions.** Record blockers and continue.
-- **Routing table only.** No premium models.
+- **Routing table only.** Sonnet is used only for Difficult tasks, as the table says.
 - **No git commits.**
 - **No scope creep.** Implement only what the plan specifies.
 - **Do not rewrite unrelated tests.** Focused additions covering the planned `Tests:` behavior are allowed.
