@@ -44,6 +44,25 @@ describe("CI workflow", () => {
   });
 });
 
+describe("CI database checks", () => {
+  it("runs a Postgres service, applies migrations, checks drift, and runs test:db", () => {
+    const yaml = read(".github/workflows/ci.yml");
+    const compose = read("docker-compose.yml");
+
+    const composeImage = compose.match(/image:\s*(postgres:\S+)/)?.[1];
+    assert.ok(composeImage);
+    assert.match(yaml, new RegExp(`image:\\s*${composeImage}\\b`));
+    assert.match(yaml, /pg_isready/);
+
+    const steps = ["npx prisma migrate deploy", "npx prisma migrate diff", "npm run test:db"].map(
+      (cmd) => yaml.indexOf(`run: ${cmd}`)
+    );
+    assert.ok(steps.every((i) => i >= 0));
+    assert.deepEqual([...steps].sort((a, b) => a - b), steps);
+    assert.match(yaml, /migrate diff\b[^\n]*--from-url[^\n]*--to-schema-datamodel[^\n]*--exit-code/);
+  });
+});
+
 describe("package scripts", () => {
   it("exposes typecheck as tsc --noEmit", () => {
     const pkg = JSON.parse(read("package.json")) as { scripts?: Record<string, string> };

@@ -18,9 +18,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Dummy loopback URL so `prisma generate` (postinstall) can read the schema.
-      # Tests mock Prisma; this job does not connect to Postgres.
+      # Loopback URL for the Postgres service below; `npm test` mocks Prisma, `test:db` does not.
       DATABASE_URL: postgresql://ccc:ccc_frontend_dev@127.0.0.1:5432/ccc_frontend
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: ccc
+          POSTGRES_PASSWORD: ccc_frontend_dev
+          POSTGRES_DB: ccc_frontend
+        options: >-
+          --health-cmd "pg_isready -U ccc -d ccc_frontend"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,9 +49,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Syntax only. Replaying migrations needs a shadow database; this job does not start Postgres.
       - name: Validate Prisma schema
         run: npx prisma validate
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Check migrations match schema.prisma
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
 
       - name: Lint
         run: npm run lint
@@ -48,6 +66,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Test database
+        run: npm run test:db
 
       - name: Build
         env:

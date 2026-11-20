@@ -42,7 +42,7 @@ Register the first operator at `/register`, then sign in. `/`, `/board`, and `PO
 - `npm run lint` — ESLint
 - `npm run typecheck` — `tsc --noEmit`
 - `npm test` — unit tests (mocked CCC and Prisma; no live LLM)
-- `npm run test:db` — Postgres job-position concurrency (local Compose only; not part of `npm test`)
+- `npm run test:db` — Postgres job-position concurrency (local Compose or CI; not part of `npm test`)
 - `npm run build` — `prisma generate` then production build
 
-Pull requests and pushes to `main` run Prisma schema validation, lint, typecheck, tests, and the production build in GitHub Actions (`.github/workflows/ci.yml`). CI does not use GitHub secrets or a database.
+Pull requests and pushes to `main` run Prisma schema validation, lint, typecheck, tests, and the production build in GitHub Actions (`.github/workflows/ci.yml`). CI uses no GitHub secrets; it starts a Postgres service, applies migrations, checks they match `schema.prisma`, and runs `npm run test:db`.
