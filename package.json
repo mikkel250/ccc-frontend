@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
-    "better-auth": "1.7.22",
+    "better-auth": "1.7.25",
     "next": "15.5.29",
     "prisma": "^6.19.3",
     "react": "19.3.1",
