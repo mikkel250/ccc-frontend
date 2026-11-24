@@ -15,6 +15,7 @@ This directory keeps project knowledge close to the code.
 
 - `api/` — CCC tailor contract mirror used by this BFF (see [api/API.md](./api/API.md)).
 - `arch/` — frontend architecture and BFF invariants.
+- `ops/` — host-agnostic production env catalog and liveness notes (see [ops/production-env.md](./ops/production-env.md)).
 - `plans/` — compound-engineering plan artifacts. [plans/README.md](./plans/README.md) is the milestone north-star.
 - `solutions/` — institutional learnings (bugs, best practices, workflow patterns).
 - `brainstorms/` — `/ce-brainstorm` artifacts.

@@ -36,4 +36,12 @@ describe("middleware", () => {
   it("matches /board and nested board paths", () => {
     assert.deepEqual(config.matcher, ["/", "/board", "/board/:path*"]);
   });
+
+  it("does not match API routes including /api/health", () => {
+    assert.equal(
+      config.matcher.some((pattern) => pattern.includes("api") || pattern.includes("health")),
+      false
+    );
+  });
 });
+
